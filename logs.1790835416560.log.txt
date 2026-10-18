@@ -1,0 +1,166 @@
+2026-10-01T06:14:45.407001438Z [inf]  Starting Container
+2026-10-01T06:14:48.359929306Z [err]  
+2026-10-01T06:14:48.359937619Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:48.359942252Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:14:48.359946145Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:14:48.359949629Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:14:48.359953847Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:14:48.359958402Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:14:48.359962167Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:14:48.359966260Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:14:48.360053442Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:48.360056714Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:14:48.360059785Z [err]      from greenlet import getcurrent
+2026-10-01T06:14:48.360062938Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:14:48.360066612Z [err]  
+2026-10-01T06:14:48.360070207Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:14:51.663586716Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:51.663590359Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:14:51.663593660Z [err]      from greenlet import getcurrent
+2026-10-01T06:14:51.663596772Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:14:51.663600127Z [err]  
+2026-10-01T06:14:51.663603069Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:14:51.663605819Z [err]  
+2026-10-01T06:14:51.663608601Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:51.663611554Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:14:51.663614506Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:14:51.663617377Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:14:51.663620412Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:14:51.663623169Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:14:51.663626011Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:14:51.663628882Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:14:55.417268047Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:55.417271308Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:14:55.417274677Z [err]      from greenlet import getcurrent
+2026-10-01T06:14:55.417278317Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:14:55.417282106Z [err]  
+2026-10-01T06:14:55.417285691Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:14:55.417290133Z [err]  
+2026-10-01T06:14:55.417293689Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:55.417297346Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:14:55.417300621Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:14:55.417304344Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:14:55.417307769Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:14:55.417311253Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:14:55.417314518Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:14:55.417318960Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:14:59.478760969Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:59.479149779Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:14:59.479155194Z [err]      from greenlet import getcurrent
+2026-10-01T06:14:59.479159098Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:14:59.479163032Z [err]  
+2026-10-01T06:14:59.479166262Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:14:59.479169602Z [err]  
+2026-10-01T06:14:59.479172895Z [err]  Traceback (most recent call last):
+2026-10-01T06:14:59.479175870Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:14:59.479179210Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:14:59.479182737Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:14:59.479186004Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:14:59.479189653Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:14:59.479192639Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:14:59.479195902Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:02.992086597Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:02.992088878Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:02.992096121Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:02.992100901Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:02.992104704Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:02.992105119Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:02.992112399Z [err]  
+2026-10-01T06:15:02.992114239Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:02.992117351Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:02.992123060Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:02.992123102Z [err]  
+2026-10-01T06:15:02.992128546Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:02.992131012Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:02.992133177Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:02.992136237Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:07.077305204Z [err]  
+2026-10-01T06:15:07.077311708Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:07.077315009Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:07.077316948Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:07.077319381Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:07.077321921Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:07.077323632Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:07.077326205Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:07.077328358Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:07.077331901Z [err]  
+2026-10-01T06:15:07.077335336Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:07.077466812Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:07.077471909Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:07.077475378Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:07.077478353Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:10.926637682Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:10.926647052Z [err]  
+2026-10-01T06:15:10.926651048Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:10.926655004Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:10.926659070Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:10.926663293Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:10.926667927Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:10.926671053Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:10.926674688Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:10.926679894Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:10.926681229Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:10.926684854Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:10.926689423Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:10.926692858Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:10.926696487Z [err]  
+2026-10-01T06:15:15.000679937Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:15.000683096Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:15.000685894Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:15.000688668Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:15.000692246Z [err]  
+2026-10-01T06:15:15.000695259Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:15.000698189Z [err]  
+2026-10-01T06:15:15.000702166Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:15.000706584Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:15.000710855Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:15.000715284Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:15.000719439Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:15.002387395Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:15.002398739Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:15.002402421Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:19.135044417Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:19.135052329Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:19.135057034Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:19.135060516Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:19.135064301Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:19.135068321Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:19.135076143Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:19.135097540Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:19.135100406Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:19.135103585Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:19.135106463Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:19.135109500Z [err]  
+2026-10-01T06:15:19.135112556Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:19.135115318Z [err]  
+2026-10-01T06:15:19.135118406Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:22.918879616Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:22.918885089Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:22.918888294Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:22.918891583Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:22.918894597Z [err]  
+2026-10-01T06:15:22.918897483Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:22.918900323Z [err]  
+2026-10-01T06:15:22.918902951Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:22.918905730Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:22.918908541Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:22.918912350Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:22.918915324Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:22.918919247Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:22.918922891Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:22.918926699Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
+2026-10-01T06:15:27.020091927Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:27.020103148Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 70, in _initialize
+2026-10-01T06:15:27.020108618Z [err]      from greenlet import getcurrent
+2026-10-01T06:15:27.020118434Z [err]  ModuleNotFoundError: No module named 'greenlet'
+2026-10-01T06:15:27.020122668Z [err]  
+2026-10-01T06:15:27.020126724Z [err]  The above exception was the direct cause of the following exception:
+2026-10-01T06:15:27.020130389Z [err]  
+2026-10-01T06:15:27.020134537Z [err]  Traceback (most recent call last):
+2026-10-01T06:15:27.020138274Z [err]    File "/app/main.py", line 64, in <module>
+2026-10-01T06:15:27.020141930Z [err]      from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+2026-10-01T06:15:27.020145162Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/__init__.py", line 28, in <module>
+2026-10-01T06:15:27.020148690Z [err]      concurrency._concurrency_shim._initialize()
+2026-10-01T06:15:27.020152076Z [err]    File "/usr/local/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py", line 79, in _initialize
+2026-10-01T06:15:27.020155093Z [err]      raise ImportError(_ERROR_MESSAGE) from e
+2026-10-01T06:15:27.020158364Z [err]  ImportError: The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed.  In order to ensure this dependency is available, use the 'sqlalchemy[asyncio]' install target:  'pip install sqlalchemy[asyncio]'
