@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.2              ║
+║        ZONEX X OTP BOT v5.3              ║
 ║  High Level UI · Channel Gate · Admin    ║
 ╚══════════════════════════════════════════╝
 """
@@ -449,10 +449,9 @@ async def fetch_otps(url: str, key: str, dev_id: str):
     return otps, last_any_dt
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ★ PHONE RESOLVER — tries every possible key so number ALWAYS shows ★
+# ★ ULTRA PHONE RESOLVER — Deep scanning for number ★
 # ══════════════════════════════════════════════════════════════════════════════
 def resolve_phone(info: dict, dev_id: str = "") -> str:
-    """Try every known phone field; return best found or '—'."""
     if not isinstance(info, dict):
         return "—"
 
@@ -465,52 +464,80 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
         s = str(v).strip()
         if s.lower() in BAD:
             return ""
-        # ignore pure numeric device IDs that are too long (probably not phone)
         return s
 
-    # 1. direct phone-ish fields
+    # 1. Standard top-level fields
     candidates = [
-        info.get("mobNo"),
-        info.get("phoneNumber"),
-        info.get("phone_number"),
-        info.get("PhoneNumber"),
-        info.get("phone"),
-        info.get("mobile"),
-        info.get("Mobile"),
-        info.get("mob"),
-        info.get("number"),
-        info.get("Number"),
-        info.get("msisdn"),
-        info.get("simNumber"),
-        info.get("sim_number"),
-        info.get("contact"),
+        info.get("mobNo"), info.get("phoneNumber"), info.get("phone_number"),
+        info.get("PhoneNumber"), info.get("phone"), info.get("mobile"),
+        info.get("Mobile"), info.get("mob"), info.get("number"),
+        info.get("Number"), info.get("msisdn"), info.get("simNumber"),
+        info.get("sim_number"), info.get("contact"), info.get("whatsapp")
     ]
 
-    # 2. sims array (list or dict)
+    # 2. Array or Dict of SIMs
     sims = info.get("sims") or info.get("SIMs") or info.get("sim") or {}
     if isinstance(sims, dict):
         sims = list(sims.values())
     if isinstance(sims, list):
         for s in sims:
-            if not isinstance(s, dict):
-                continue
-            for k in ("phoneNumber", "phone", "number", "mobNo",
-                      "mobile", "msisdn", "simNumber", "Number"):
-                candidates.append(s.get(k))
+            if not isinstance(s, dict): continue
+            candidates.extend([
+                s.get("phoneNumber"), s.get("phone"), s.get("number"),
+                s.get("mobNo"), s.get("mobile"), s.get("msisdn"),
+                s.get("simNumber"), s.get("Number")
+            ])
 
-    # 3. nested "device" / "info" / "data" objects
-    for nest_key in ("device", "info", "data", "details", "meta"):
+    # 3. Nested Objects
+    for nest_key in ("device", "info", "data", "details", "meta", "extra", "simInfo"):
         nest = info.get(nest_key)
         if isinstance(nest, dict):
-            for k in ("phone", "phoneNumber", "mobNo", "mobile", "number"):
-                candidates.append(nest.get(k))
+            candidates.extend([
+                nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"),
+                nest.get("mobile"), nest.get("number")
+            ])
+            # Nested SIMs
+            if "sims" in nest:
+                ns = nest["sims"]
+                if isinstance(ns, dict): ns = list(ns.values())
+                if isinstance(ns, list):
+                    for s in ns:
+                        if isinstance(s, dict):
+                            candidates.extend([
+                                s.get("phoneNumber"), s.get("phone"), s.get("number")
+                            ])
 
+    # 4. Deep recursive search (catches any field having 10-12 digits)
+    found_deep = ""
+    def _deep_scan(d):
+        nonlocal found_deep
+        if found_deep: return
+        if isinstance(d, dict):
+            for k, v in d.items():
+                if "phone" in str(k).lower() or "mob" in str(k).lower() or "number" in str(k).lower() or "sim" in str(k).lower():
+                    s = _clean(v)
+                    if s and s.isdigit() and 10 <= len(s) <= 13:
+                        found_deep = s
+                        return
+                if isinstance(v, (dict, list)):
+                    _deep_scan(v)
+        elif isinstance(d, list):
+            for v in d:
+                _deep_scan(v)
+    _deep_scan(info)
+    if found_deep:
+        candidates.append(found_deep)
+
+    # Evaluate candidates
     for c in candidates:
         s = _clean(c)
         if s:
-            return _normalize_phone(s)
+            # Remove spaces and non-digits for check
+            digits = re.sub(r"\D", "", s)
+            if len(digits) >= 10:
+                return _normalize_phone(s)
 
-    # 4. last resort — if dev_id itself looks like a phone number
+    # Last resort — device_id itself is a number
     if dev_id and dev_id.isdigit() and 10 <= len(dev_id) <= 13:
         return _normalize_phone(dev_id)
 
@@ -632,26 +659,6 @@ def _normalize_phone(ph: str) -> str:
         return digits
     return f"+{pure}"
 
-def _has_valid_phone(info: dict) -> bool:
-    ph = str(info.get("phone", "")).strip()
-    if not ph:
-        return False
-    low = ph.lower()
-    bad_words = {"unknown", "none", "null", "n/a", "na", "no number",
-                 "not available", "unavailable", "undefined", "invalid"}
-    if low in bad_words or low in ("—", "-", "–"):
-        return False
-    if low.endswith("new"):
-        return False
-    if " " in ph:
-        return False
-    stripped = ph.lstrip("+")
-    if not stripped.isdigit():
-        return False
-    if len(stripped) < 6:
-        return False
-    return True
-
 def count_online() -> int:
     return sum(1 for dm in device_cache.values()
                for d in dm.values()
@@ -697,9 +704,6 @@ def txt_welcome_panel(name: str, uid: int) -> str:
         f"🕐 Last Sync  › {last_refresh}\n"
         f"🔄 Auto Refresh › {AUTO_REFRESH}s"
     )
-
-def _val(v: str) -> bool:
-    return bool(v) and v not in ("—", "-", "–", "None", "none", "null", "")
 
 def txt_device_card(label: str, dev_id: str) -> str:
     info  = device_cache.get(label, {}).get(dev_id, {})
@@ -775,30 +779,6 @@ def txt_user_panel(uid: int) -> str:
         f"{'─'*28}\n"
         f"<i>Key kabhi nahi badlegi — sirf tumhari hai 🔒</i>"
     )
-
-def txt_plans() -> str:
-    plans = data.get("pricing_plans",[])
-    upi   = data.get("upi_id","")
-    if not plans:
-        return f"💰 Koi plan nahi hai abhi.\n👑 Contact: {ADMIN_USERNAME}"
-    lines = ["💰 <b>Buy Key — Plans</b>\n","━"*28,"\n\n"]
-    for p in plans:
-        h = int(p['hours'])
-        if h >= 720:
-            dur = f"{h//720} Month"
-        elif h >= 168:
-            dur = f"{h//168} Week"
-        elif h >= 24:
-            dur = f"{h//24} Din"
-        else:
-            dur = f"{h}h"
-        lines.append(f"📦 <b>{dur}</b>  —  ⏱{h}h  —  💵 <b>₹{p['price']}</b>\n")
-    lines.append(f"\n{'─'*28}\n")
-    if upi:
-        lines.append(f"💳 <b>UPI ID:</b> <code>{upi}</code>\n\n")
-    lines += [f"<i>Payment ke baad admin ko screenshot bhejo.</i>\n",
-              f"👑 {ADMIN_USERNAME}"]
-    return "".join(lines)
 
 def txt_stats() -> str:
     active = sum(1 for s, u in data["users"].items() if has_access(int(s)))
@@ -1066,7 +1046,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     all_joined, missing = await check_channels(ctx.bot, uid)
     if not all_joined:
-        # ★ PATCHED: Text first, channel buttons below
         await update.message.reply_text(
             f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
             f"🤖  <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
@@ -1096,7 +1075,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 data["users"][str(ref_uid)].get("referral_count", 0) + 1
             save_data(data)
             try:
-                # ★ PATCHED: Styled referral bonus card
                 await ctx.bot.send_message(
                     ref_uid,
                     f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
@@ -1111,7 +1089,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except: pass
 
-        # ★ PATCHED: Styled welcome card
         await update.message.reply_text(
             f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
             f"🎉  <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
@@ -1278,7 +1255,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     data["users"][str(ref_uid)].get("referral_count", 0) + 1
                 save_data(data)
                 try:
-                    # ★ PATCHED: Styled referral bonus card
                     await ctx.bot.send_message(
                         ref_uid,
                         f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
@@ -2619,7 +2595,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.2 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.3 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
