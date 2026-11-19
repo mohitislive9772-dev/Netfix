@@ -209,6 +209,40 @@ async def _sync_from_firebase_on_startup():
 def get_referral_hours() -> float:
     return float(data.get("referral_hours", 1))
 
+def get_best_phone(info: dict) -> str:
+    """Firebase JSON se best possible phone number nikalta hai."""
+    if not isinstance(info, dict): return "—"
+    
+    # 1. Direct fields check
+    keys = ["mobNo", "phoneNumber", "phone", "mobile", "Mobile", 
+            "phone_number", "PhoneNumber", "phoneNo", "mob_no", "contact", "number"]
+    for k in keys:
+        v = info.get(k)
+        if v:
+            s = str(v).strip()
+            if s and s not in ("None", "none", "", "—", "-", "Unknown", "unknown", "null"):
+                return s
+                
+    # 2. Sims nested fields check
+    sims = info.get("sims") or {}
+    sl = sims if isinstance(sims, list) else list(sims.values())
+    for sim in sl:
+        if isinstance(sim, dict):
+            for k in ["phoneNumber", "phone", "number", "mobNo"]:
+                v = sim.get(k)
+                if v:
+                    s = str(v).strip()
+                    if s and s not in ("None", "none", "", "—", "-", "Unknown", "unknown", "null"):
+                        return s
+                        
+    # 3. Deep Search (Fallback)
+    for k, v in info.items():
+        if isinstance(v, str) and ("phone" in k.lower() or "mob" in k.lower() or "number" in k.lower()):
+            if len(re.sub(r"\D", "", v)) >= 10:
+                return v
+                
+    return "—"
+
 # ─── Cache ────────────────────────────────────────────────────────────────────
 device_cache: dict   = {}
 otp_cache:    dict   = {}
@@ -459,20 +493,9 @@ async def refresh_firebase(cfg: dict):
     valid = []
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
-        sims = info.get("sims") or {}
-        sl   = sims if isinstance(sims, list) else list(sims.values())
-        def _pick(*vals):
-            for v in vals:
-                s = str(v).strip()
-                if s and s not in ("None","none","","—","-","Unknown","unknown","null"):
-                    return s
-            return "—"
-        sim_phone = sl[0].get("phoneNumber") or sl[0].get("phone") or sl[0].get("number","") if sl else ""
-        phone = _pick(
-            info.get("mobNo"), info.get("phoneNumber"), info.get("phone"),
-            info.get("mobile"), info.get("Mobile"), info.get("phone_number"),
-            info.get("PhoneNumber"), sim_phone,
-        )
+        
+        # PHONE NUMBER FIX
+        phone = get_best_phone(info)
         valid.append((dev_id, info, phone))
 
     async def _fetch_one(dev_id):
@@ -521,20 +544,10 @@ async def refresh_clients_only(cfg: dict):
     for dev_id, info in clients.items():
         if not isinstance(info, dict):
             continue
-        sims = info.get("sims") or {}
-        sl   = sims if isinstance(sims, list) else list(sims.values())
-        def _pick(*vals):
-            for v in vals:
-                s = str(v).strip()
-                if s and s not in ("None", "none", "", "—", "-", "Unknown", "unknown", "null"):
-                    return s
-            return "—"
-        sim_phone = (sl[0].get("phoneNumber") or sl[0].get("phone") or sl[0].get("number", "")) if sl else ""
-        phone = _pick(
-            info.get("mobNo"), info.get("phoneNumber"), info.get("phone"),
-            info.get("mobile"), info.get("Mobile"), info.get("phone_number"),
-            info.get("PhoneNumber"), sim_phone,
-        )
+            
+        # PHONE NUMBER FIX
+        phone = get_best_phone(info)
+        
         fb_status = bool(info.get("status") or info.get("isOnline") or
                          info.get("is_online") or info.get("online"))
         is_online = fb_status  
@@ -577,6 +590,7 @@ async def refresh_all():
 # ─── Stats ────────────────────────────────────────────────────────────────────
 def _normalize_phone(ph: str) -> str:
     ph = str(ph).strip()
+    if ph == "—": return ph
     digits = re.sub(r"[\s\-\.\(\)]", "", ph)
     pure = digits.lstrip("+")
     if not pure.isdigit():
@@ -588,26 +602,6 @@ def _normalize_phone(ph: str) -> str:
     if digits.startswith("+"):
         return digits
     return f"+{pure}"
-
-def _has_valid_phone(info: dict) -> bool:
-    ph = str(info.get("phone", "")).strip()
-    if not ph:
-        return False
-    low = ph.lower()
-    bad_words = {"unknown", "none", "null", "n/a", "na", "no number",
-                 "not available", "unavailable", "undefined", "invalid"}
-    if low in bad_words or low in ("—", "-", "–", "—"):
-        return False
-    if low.endswith("new"):
-        return False
-    if " " in ph:
-        return False
-    stripped = ph.lstrip("+")
-    if not stripped.isdigit():
-        return False
-    if len(stripped) < 6:
-        return False
-    return True
 
 def count_online() -> int:
     return sum(1 for dm in device_cache.values()
@@ -654,9 +648,6 @@ def txt_welcome_panel(name: str, uid: int) -> str:
         f"🕐 Last Sync  › {last_refresh}\n"
         f"🔄 Auto Refresh › {AUTO_REFRESH}s"
     )
-
-def _val(v: str) -> bool:
-    return bool(v) and v not in ("—", "-", "–", "None", "none", "null", "")
 
 def txt_device_card(label: str, dev_id: str) -> str:
     info  = device_cache.get(label, {}).get(dev_id, {})
