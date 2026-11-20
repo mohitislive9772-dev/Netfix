@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v8.0              ║
-║  Ultimate Fix: UI · Groups · Auto-Alert  ║
+║        ZONEX X OTP BOT v9.0              ║
+║  Device Sync · Anti-Spam Fix · Alerts    ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -32,7 +32,6 @@ BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
 AUTO_REFRESH   = 10
 
-# 3 Force-Join Jagah (2 Channel + 1 Group)
 CHANNELS = ["zonexarmy", "SMARTEARNERS011", "ZonexotpGroup"]   
 CH_NAMES = {
     "zonexarmy": "📢 𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
@@ -40,7 +39,6 @@ CH_NAMES = {
     "ZonexotpGroup": "💬 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏 𝐆𝐑𝐎𝐔𝐏",
 }
 
-# Group ID (Direct ID se message jayega)
 OTP_ALERT_GROUP_ID = -1004463422895  
 
 # ─── Firebase Configuration ──────────────────────────────────────────────────
@@ -2522,7 +2520,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v8.0 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v9.0 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
