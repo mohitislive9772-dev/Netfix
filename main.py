@@ -392,7 +392,7 @@ async def fetch_otps(url: str, key: str, dev_id: str):
     return otps, last_any_dt
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED resolve_phone() — SUPER DEEP SCAN (10 level tak)
+# ✅ FIXED resolve_phone() — SUPER SCANNER (15 Level tak)
 # ══════════════════════════════════════════════════════════════════════════════
 def resolve_phone(info: dict, dev_id: str = "") -> str:
     if not isinstance(info, dict): return "—"
@@ -436,10 +436,11 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
             elif isinstance(s, str):
                 candidates.append(s)
 
+    # ✅ SUPER DEEP SCAN (15 Level Tak Jhaankega)
     found_deep = ""
     def _deep_scan(d, depth=0):
         nonlocal found_deep
-        if found_deep or depth > 10: return
+        if found_deep or depth > 15: return
         if isinstance(d, dict):
             for k, v in d.items():
                 kl = str(k).lower()
@@ -647,11 +648,9 @@ def all_online() -> list:
                 if ph == "—" or not ph.strip():
                     continue
                     
-                # Duplicate check unique ID + Number combo se taaki alag firebase ka same number dikhe
-                combo_key = f"{lb}_{ph}"
-                if combo_key in seen_numbers:
+                if ph in seen_numbers:
                     continue
-                seen_numbers.add(combo_key)
+                seen_numbers.add(ph)
                 res.append((lb, did, info))
     return res
 
@@ -2584,9 +2583,8 @@ def main():
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
-    logger.info(f"🔑 API Key: {GAPI_KEY[:15]}..." if GAPI_KEY else "❌ API Key NOT SET!")
-
-    app = Application.builder().token(BOT_TOKEN).post_init(_on_startup).concurrent_updates(True).build()
+    logger.info(f"🔑 API Key: {GAPI_KEY[:
+app = Application.builder().token(BOT_TOKEN).post_init(_on_startup).concurrent_updates(True).build()
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", cmd_start)],
@@ -2612,3 +2610,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+            
