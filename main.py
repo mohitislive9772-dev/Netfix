@@ -647,9 +647,11 @@ def all_online() -> list:
                 if ph == "—" or not ph.strip():
                     continue
                     
-                if ph in seen_numbers:
+                # Duplicate check unique ID + Number combo se taaki alag firebase ka same number dikhe
+                combo_key = f"{lb}_{ph}"
+                if combo_key in seen_numbers:
                     continue
-                seen_numbers.add(ph)
+                seen_numbers.add(combo_key)
                 res.append((lb, did, info))
     return res
 
