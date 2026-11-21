@@ -2527,6 +2527,8 @@ def main():
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
+    
+    # ✅ FIXED LINE (No Syntax Error)
     logger.info(f"🔑 API Key: {GAPI_KEY[:15]}..." if GAPI_KEY else "❌ API Key NOT SET!")
 
     app = Application.builder().token(BOT_TOKEN).post_init(_on_startup).concurrent_updates(True).build()
