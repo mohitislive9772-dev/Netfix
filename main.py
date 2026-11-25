@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.3              ║
-║  Premium UI & Welcome Message Update     ║
+║        ZONEX X OTP BOT v5.4              ║
+║  Fixed Start Flow & Premium Welcome      ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -1051,6 +1051,25 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
+    # AGAR CHANNELS DONE HAI PAR KEY VERIFY NAHI HUI HAI
+    if u.get("channels_done") and not u.get("key_verified"):
+        key = get_key(uid)
+        await update.message.reply_text(
+            f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+            f"🎉 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
+            f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"🎁 <b>{WELCOME_HOURS} 𝐇𝐎𝐔𝐑 𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒!</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🗝 <b>𝐘𝐎𝐔𝐑 𝐏𝐄𝐑𝐌𝐀𝐍𝐄𝐍𝐓 𝐊𝐄𝐘:</b>\n\n"
+            f"<code>{key}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👆 Copy Key & Send It Here\n"
+            f"⚡ Panel Opens Instantly!",
+            parse_mode="HTML"
+        )
+        return WAIT_KEY
+
+    # PEHLI BAAR AA RAHA HAI
     if not u.get("channels_done"):
         add_hours(uid, WELCOME_HOURS)
         u["channels_done"] = True
@@ -1080,7 +1099,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except: pass
 
-        # ── WELCOME PREMIUM KEY MESSAGE ──
         await update.message.reply_text(
             f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
             f"🎉 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
@@ -1092,19 +1110,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"👆 Copy Key & Send It Here\n"
             f"⚡ Panel Opens Instantly!",
-            parse_mode="HTML"
-        )
-        return WAIT_KEY
-
-    if not u.get("key_verified"):
-        key = get_key(uid)
-        await update.message.reply_text(
-            f"🗝 <b>Key Verification</b>\n"
-            f"{'━'*28}\n\n"
-            f"Apni key copy karo aur yahan bhejo:\n\n"
-            f"<code>{key}</code>\n\n"
-            f"{'─'*28}\n"
-            f"<i>Key bhejne ke baad panel khul jaayega ⚡</i>",
             parse_mode="HTML"
         )
         return WAIT_KEY
@@ -1266,12 +1271,16 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data["waiting_key"] = True
             key = get_key(uid)
             await q.edit_message_text(
-                f"🗝 <b>Key Verification</b>\n"
-                f"{'━'*28}\n\n"
-                f"Apni key copy karo aur yahan bhejo:\n\n"
+                f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                f"🎉 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
+                f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                f"🎁 <b>{WELCOME_HOURS} 𝐇𝐎𝐔𝐑 𝐅𝐑𝐄𝐄 𝐀𝐂𝐂𝐄𝐒𝐒!</b>\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🗝 <b>𝐘𝐎𝐔𝐑 𝐏𝐄𝐑𝐌𝐀𝐍𝐄𝐍𝐓 𝐊𝐄𝐘:</b>\n\n"
                 f"<code>{key}</code>\n\n"
-                f"{'─'*28}\n"
-                f"<i>Key bhejne ke baad panel khul jaayega ⚡</i>",
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👆 Copy Key & Send It Here\n"
+                f"⚡ Panel Opens Instantly!",
                 parse_mode="HTML"
             )
         return
@@ -2626,7 +2635,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.3 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.4 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
